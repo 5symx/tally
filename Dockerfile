@@ -13,7 +13,10 @@ RUN apt-get update && \
         libncurses5-dev \
         pkg-config \
         zlib1g \
-        g++-10
+        g++-10 \
+        python3 \
+        python3-pip \
+        sudo tzdata libssl-dev
 
 RUN rm /usr/bin/g++ && \
     ln -s /usr/bin/g++-10 /usr/bin/g++
@@ -25,7 +28,7 @@ RUN cd /home && \
     ln -s /opt/cmake/bin/cmake /usr/local/bin/cmake
 
 RUN cd /home && \
-    wget https://boostorg.jfrog.io/artifactory/main/release/1.80.0/source/boost_1_80_0.tar.gz && \
+    wget https://archives.boost.io/release/1.80.0/source/boost_1_80_0.tar.gz && \
     tar xvf boost_1_80_0.tar.gz && \
     cd boost_1_80_0 && \
     ./bootstrap.sh --prefix=/usr/ && \
@@ -43,6 +46,6 @@ RUN cd cudnn && \
 
 RUN cd third_party && \
     cp cudnn-frontend/ /usr/local/cuda/ -r
-
-RUN cd /home/tally && \
-    make
+#RUN cd /home/tally && \
+#    make folly && \ 
+#    make

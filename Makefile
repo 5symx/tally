@@ -1,9 +1,12 @@
 all: build
 
+folly:
+	cd third_party/folly && ./build/fbcode_builder/getdeps.py install-system-deps --recursive && mkdir _build && cd _build &&  cmake .. && make -j$(nproc) && make install;
+
 build: FORCE
-	cd third_party/nccl && make -j src.build
+	cd third_party/nccl && make -j src.build NVCC_GENCODE="-gencode=arch=compute_89,code=sm_89"
 	cd third_party/nccl/ext-net/example && make
 	mkdir -p build
-	cd build && cmake .. && make -j
+	cd build && cmake .. -DCMAKE_CUDA_STANDARD=17 && make -j
 
 FORCE: ;
