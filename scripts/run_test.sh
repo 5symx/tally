@@ -19,15 +19,16 @@ run_tally_test() {
     fi
 
     # Launch client process
-    ./scripts/start_client.sh $@
+    ./scripts/start_client_local.sh $@
 
     ./scripts/kill_server.sh
 }
 
 test_list=(
-#    "python3 ./tests/pytorch_samples/addmm.py"
-    "./build/tests/elementwise_no_ptx"
-    "./build/tests/elementwise"
+    "python3 ./tests/pytorch_samples/addmm.py"
+#    "python3 ./tests/pytorch_samples/run-imagenet.py"
+#    "./build/tests/elementwise_no_ptx"
+#    "./build/tests/elementwise"
    # "./tests/cudnn_samples_v8/mnistCUDNN/mnistCUDNN"
 )
 
