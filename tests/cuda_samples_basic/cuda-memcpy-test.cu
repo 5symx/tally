@@ -23,6 +23,13 @@ int main() {
     cuInit(0);
     cuDeviceGet(&cuDevice, 0);
     cuCtxCreate(&cuContext, 0, cuDevice);
+    
+    cudaDeviceSynchronize();
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start, 0);
 
     // Allocate device memory
     cuMemAlloc(&d_data_ptr, N * sizeof(int));
@@ -42,6 +49,14 @@ int main() {
     // Synchronize the stream to make sure the copy is complete
     cuStreamSynchronize(stream);
 
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+
+    printf("Kernel execution time: %.2f ms\n", milliseconds);
+
     // Verify the data
     for (int i = 0; i < N; i++) {
         if (h_data[i] != i) {
@@ -51,9 +66,9 @@ int main() {
     }
 
     // Clean up
-    // cuStreamDestroy(stream);
-    // cuMemFree(d_data_ptr);
-    // cuCtxDestroy(cuContext);
+    //cuStreamDestroy(stream);
+    //cuMemFree(d_data_ptr);
+    //cuCtxDestroy(cuContext);
 
     printf("Test completed successfully!\n");
     return 0;

@@ -291,6 +291,13 @@ target_include_directories(ampere_tf32_tensorop_gemm
     PUBLIC  ${PROJECT_SOURCE_DIR}/tests
 )
 
+add_executable(test-vmm cuda_samples_basic/test-vmm.cu)
+
+target_link_libraries(test-vmm
+    cuda
+    cudart
+)
+
 add_executable(cuda-memcpy-test cuda_samples_basic/cuda-memcpy-test.cu)
 
 target_link_libraries(cuda-memcpy-test

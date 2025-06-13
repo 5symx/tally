@@ -900,7 +900,7 @@ void TallyServer::handle___cudaRegisterFatBinaryEnd(void *__args, iox::popo::Unt
 
 void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_server, const void* const requestPayload)
 {
-    TALLY_SPD_LOG("Received request: cudaMalloc to cuMemAlloc");
+    TALLY_SPD_LOG("Received request: cudaMalloc to cuVMM");
 	auto args = (struct cudaMallocArg *) __args;
 
     auto requestHeader = iox::popo::RequestHeader::fromPayload(requestPayload);
@@ -911,20 +911,87 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
         .and_then([&](auto& responsePayload) {
 
             auto response = static_cast<cudaMallocResponse*>(responsePayload);
- 
+          
             //response->err = cudaMalloc(&(response->devPtr), args->size);
-            response->err = (cuMemAlloc((CUdeviceptr*)&(response->devPtr), args->size) == CUDA_SUCCESS) ? cudaSuccess : cudaErrorMemoryAllocation;
+            //response->err = (cuMemAlloc((CUdeviceptr*)&(response->devPtr), args->size) == CUDA_SUCCESS) ? cudaSuccess : cudaErrorMemoryAllocation; 
+	    
+	    // Step 1: Create Virtual Memory AllocationI
+            CUmemAllocationProp prop = {};
+            prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+            prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+            prop.location.id = 0;
+
+            size_t aligned_sz, size;
+            CUresult res = cuMemGetAllocationGranularity(&aligned_sz, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM);
+            size = ((args->size + aligned_sz - 1) / aligned_sz) * aligned_sz;
+            TALLY_SPD_LOG("vmm size realign from "+ std::to_string(args->size) + " to " + std::to_string(size));
+
+
+            CUmemGenericAllocationHandle memHandle;
+            res = cuMemCreate(&memHandle, size, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM);
+            if (res != CUDA_SUCCESS) {
+                response->err = cudaErrorMemoryAllocation;
+                //CHECK_CUDA_ERROR(response->err);
+                goto send_res;
+            }
+
+            // Step 2: Reserve Virtual Address Space
+            CUdeviceptr dptr;
+            res = cuMemAddressReserve(&dptr, size, 0, 0, 0);
+            if (res != CUDA_SUCCESS) {
+                response->err = cudaErrorMemoryAllocation;
+                //CHECK_CUDA_ERROR(response->err);
+                cuMemRelease(memHandle);
+                goto send_res;
+            } 
+            
+	    // Step 3: Map the Allocation to Reserved Address Space
+            res = cuMemMap(dptr, size, 0, memHandle, 0);
+            if (res != CUDA_SUCCESS) {
+                response->err = cudaErrorMemoryAllocation;
+                //CHECK_CUDA_ERROR(response->err);
+                cuMemAddressFree(dptr, args->size);
+                cuMemRelease(memHandle);
+                goto send_res;
+            }
+
+            // Step 4: Set Access Permissions
+            CUmemAccessDesc accessDesc;// = {0};
+            accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+            accessDesc.location.id = 0;
+            accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+            res = cuMemSetAccess(dptr, size, &accessDesc, 1);
+            if (res != CUDA_SUCCESS) {
+                response->err = cudaErrorMemoryAllocation;
+                //CHECK_CUDA_ERROR(response->err);
+                cuMemUnmap(dptr, args->size);
+                cuMemRelease(memHandle);
+                cuMemAddressFree(dptr, args->size);
+                goto send_res;
+            }
+
+            // Step 5: Store the allocated memory in response
+            response->err = cudaSuccess;
+            //response->dptr = dptr; 
+	    response->devPtr = (void*)dptr;
+	    
+	    //response->err = cudaMalloc(&(response->devPtr), args->size);
+            //response->err = (cuMemAlloc((CUdeviceptr*)&(response->devPtr), args->size) == CUDA_SUCCESS) ? cudaSuccess : cudaErrorMemoryAllocation;
 
             // Keep track that this addr is device memory
             if (response->err == cudaSuccess) {
-                client_data_all[client_id].dev_addr_map.push_back( mem_region(response->devPtr, args->size) );
+                client_data_all[client_id].dev_addr_map.push_back( mem_region(response->devPtr, size) );
             }
 
-            if (response->err == cudaErrorMemoryAllocation) {
-                TALLY_SPD_WARN("Encountered cudaErrorMemoryAllocation " + std::string(__FILE__) + ":" + std::to_string(__LINE__));
-            }
+            //if (response->err == cudaErrorMemoryAllocation) {
+            //    TALLY_SPD_WARN("Encountered cudaErrorMemoryAllocation " + std::string(__FILE__) + ":" + std::to_string(__LINE__));
+            //}
             
-            iox_server->send(response).or_else(
+        send_res:
+	    if (response->err != cudaSuccess) {
+                TALLY_SPD_WARN("Encountered cudaErrorMemoryAllocation " + std::string(__FILE__) + ":" + std::to_string(__LINE__));
+            }    
+	    iox_server->send(response).or_else(
                 [&](auto& error) { LOG_ERR_AND_EXIT("Could not send Response: ", error); });
         })
         .or_else(
@@ -3873,7 +3940,7 @@ void TallyServer::handle_cuStreamCreate(void *__args, iox::popo::UntypedServer *
 
 void TallyServer::handle_cuMemAlloc_v2(void *__args, iox::popo::UntypedServer *iox_server, const void* const requestPayload)
 {
-	TALLY_SPD_LOG("Received request: cuMemAlloc_v2");
+	TALLY_SPD_LOG("Received request: cuMemAlloc_v2 to cuVMM");
 	auto args = (struct cuMemAlloc_v2Arg *) __args;
 	auto requestHeader = iox::popo::RequestHeader::fromPayload(requestPayload);
     auto msg_header = static_cast<const MessageHeader_t*>(requestPayload);
@@ -3882,17 +3949,76 @@ void TallyServer::handle_cuMemAlloc_v2(void *__args, iox::popo::UntypedServer *i
     iox_server->loan(requestHeader, sizeof(cuMemAlloc_v2Response), alignof(cuMemAlloc_v2Response))
         .and_then([&](auto& responsePayload) {
             auto response = static_cast<cuMemAlloc_v2Response*>(responsePayload);
-            response->err = cuMemAlloc_v2(
-				(args->dptr ? &(response->dptr) : NULL),
-				args->bytesize
-			);
-            CHECK_CUDA_ERROR(response->err);
+            //response->err = cuMemAlloc_v2(
+	//			(args->dptr ? &(response->dptr) : NULL),
+	//			args->bytesize
+	//		);
+        //    CHECK_CUDA_ERROR(response->err);
+	    
+	    // Step 1: Create Virtual Memory AllocationI
+	    CUmemAllocationProp prop = {};
+            prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+            prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+            prop.location.id = 0;
+            
+	    size_t aligned_sz, size;
+            CUresult res = cuMemGetAllocationGranularity(&aligned_sz, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM);
+            size = ((args->bytesize + aligned_sz - 1) / aligned_sz) * aligned_sz;
+	    TALLY_SPD_LOG("vmm size realign from "+ std::to_string(args->bytesize) + " to " + std::to_string(size)); 
+
+
+	    CUmemGenericAllocationHandle memHandle;
+            res = cuMemCreate(&memHandle, size, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM);
+            if (res != CUDA_SUCCESS) {
+                response->err = res;
+                CHECK_CUDA_ERROR(response->err);
+                goto send_res;
+            }
+
+            // Step 2: Reserve Virtual Address Space
+            CUdeviceptr dptr;
+            res = cuMemAddressReserve(&dptr, size, 0, 0, 0);
+            if (res != CUDA_SUCCESS) {
+                response->err = res;
+                CHECK_CUDA_ERROR(response->err);
+                cuMemRelease(memHandle);
+                goto send_res;
+            }
+
+            // Step 3: Map the Allocation to Reserved Address Space
+            res = cuMemMap(dptr, size, 0, memHandle, 0);
+            if (res != CUDA_SUCCESS) {
+                response->err = res;
+                CHECK_CUDA_ERROR(response->err);
+                cuMemAddressFree(dptr, size);
+                cuMemRelease(memHandle);
+                goto send_res;
+            }
+
+            // Step 4: Set Access Permissions
+            CUmemAccessDesc accessDesc;// = {0};
+            accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+            accessDesc.location.id = 0;
+            accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+            res = cuMemSetAccess(dptr, size, &accessDesc, 1);
+            if (res != CUDA_SUCCESS) {
+                response->err = res;
+                CHECK_CUDA_ERROR(response->err);
+                cuMemUnmap(dptr, size);
+                cuMemRelease(memHandle);
+                cuMemAddressFree(dptr, size);
+                goto send_res;
+            }
+
+            // Step 5: Store the allocated memory in response
+            response->err = CUDA_SUCCESS;
+            response->dptr = dptr;
 
             // Keep track that this addr is device memory
             if (response->err == CUDA_SUCCESS) {
-                client_data_all[client_id].dev_addr_map.push_back( mem_region((void *)response->dptr, args->bytesize) );
+                client_data_all[client_id].dev_addr_map.push_back( mem_region((void *)response->dptr, size) );
             }
-
+        send_res:
             iox_server->send(response).or_else(
                 [&](auto& error) { LOG_ERR_AND_EXIT("Could not send Response: ", error); });
         })

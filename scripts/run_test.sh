@@ -37,8 +37,9 @@ test_list=(
 #    "./build/tests/elementwise_no_ptx"
 #    "./build/tests/cuda-memcpy-test"	# cuMemAlloc
 #    "./build/tests/cublas_test"
+#    "./build/tests/elementwise"
+#    "./build/tests/test-vmm"
     "./build/tests/elementwise"
-#    "./build/tests/test-sync"
    # "./tests/cudnn_samples_v8/mnistCUDNN/mnistCUDNN"
 )
 
@@ -49,6 +50,11 @@ set -e
 # Build tally and tests
 make SERVER_VERSION=$SERVER_VERSION
 #cd tests && cd cudnn_samples_v8 && make && cd .. && cd ..
+./scripts/kill_server.sh & 
+sleep 5
+
+./scripts/kill_iox.sh &
+sleep 5
 
 ./scripts/start_iox.sh &
 sleep 5
