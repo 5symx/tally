@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.24)
 project(tally LANGUAGES C CXX CUDA)
 enable_language(CUDA)
 
+#set(SERVER_VERSION server)
+set(SERVER_VERSION "server" CACHE STRING "Server version")
+message(STATUS "SERVER_VERSION is set to: ${SERVER_VERSION}")
+
 set(CMAKE_CUDA_COMPILER nvcc)
 set(CMAKE_CXX_STANDARD 20)
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -Wno-deprecated-declarations -Wno-comment -Wno-deprecated -Wno-maybe-uninitialized")
@@ -65,7 +69,7 @@ set(TALLY_SRC_FILES
 
 set(TALLY_SERVER_SRC_FILES
     ${PROJECT_SOURCE_DIR}/src/tally/measurements.cpp
-    ${PROJECT_SOURCE_DIR}/src/tally/server.cpp
+    ${PROJECT_SOURCE_DIR}/src/tally/${SERVER_VERSION}.cpp
     ${PROJECT_SOURCE_DIR}/src/tally/generated/server.cpp
     ${PROJECT_SOURCE_DIR}/src/tally/partial.cpp
     ${PROJECT_SOURCE_DIR}/src/tally/cuda_launch.cpp

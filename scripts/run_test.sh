@@ -1,4 +1,11 @@
 #!/bin/bash
+SERVER_VERSION=$1
+
+if [ -z "$SERVER_VERSION" ]; then
+    echo "Error: SERVER_VERSION is not set!"
+    echo "Usage: ./run_tests.sh <server_version>"
+    exit 1
+fi
 
 cleanup() {
     ./scripts/kill_server.sh
@@ -31,6 +38,7 @@ test_list=(
 #    "./build/tests/cuda-memcpy-test"	# cuMemAlloc
 #    "./build/tests/cublas_test"
     "./build/tests/elementwise"
+#    "./build/tests/test-sync"
    # "./tests/cudnn_samples_v8/mnistCUDNN/mnistCUDNN"
 )
 
@@ -39,7 +47,7 @@ trap cleanup ERR
 set -e
 
 # Build tally and tests
-make
+make SERVER_VERSION=$SERVER_VERSION
 #cd tests && cd cudnn_samples_v8 && make && cd .. && cd ..
 
 ./scripts/start_iox.sh &
