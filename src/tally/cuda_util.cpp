@@ -13,7 +13,7 @@
 
 bool CUDA_SPECS_INITIALIZED = false;
 
-std::vector<std::string> CUDA_COMPUTE_CAPABILITIES = {"90", "86", "80"};
+std::vector<std::string> CUDA_COMPUTE_CAPABILITIES = {"90", "89", "86", "80"};
 std::string CUDA_COMPUTE_CAPABILITY;
 int CUDA_NUM_SM;
 int CUDA_MAX_NUM_THREADS_PER_SM;
