@@ -14,3 +14,18 @@ change get_candidate_cuda_compute_capabilities() list into "89"
 
 ### pytorch intercept
 using start_client_local.sh in run_test.sh  avoid cuGetExportTable internal API runtime_error
+
+## test benchmark
+Inside Docker:
+
+```sh
+./scripts/run_test.sh <server_version>
+```
+## Roadmap
+
+### intercept vmm to cuda memory alloc
+
+TODO:
+1.enable safe free memory
+2.small chunk need to be allocate at 2MB because of granuraity
+3.need to add a flag to set is it allocate as shared or not. send it with args-> tag

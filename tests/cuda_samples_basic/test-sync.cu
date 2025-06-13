@@ -23,13 +23,13 @@ __host__ void runElementwiseAddition(float* arr_a, float* arr_b, float* arr_c, i
 {
     // Allocate memory on the device (GPU)
     float* deviceA, * deviceB, * deviceC;
-    cudaMalloc((void**)&deviceA, size * sizeof(float));
-    cudaMalloc((void**)&deviceB, size * sizeof(float));
-    cudaMalloc((void**)&deviceC, size * sizeof(float));
+    //cudaMalloc((void**)&deviceA, size * sizeof(float));
+    //cudaMalloc((void**)&deviceB, size * sizeof(float));
+    //cudaMalloc((void**)&deviceC, size * sizeof(float));
     
     // Copy input arrays from host to device
-    cudaMemcpy(deviceA, arr_a, size * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(deviceB, arr_b, size * sizeof(float), cudaMemcpyHostToDevice);
+    //cudaMemcpy(deviceA, arr_a, size * sizeof(float), cudaMemcpyHostToDevice);
+    //cudaMemcpy(deviceB, arr_b, size * sizeof(float), cudaMemcpyHostToDevice);
 
     // Define execution configuration
     dim3 block_dim(256);
@@ -39,12 +39,21 @@ __host__ void runElementwiseAddition(float* arr_a, float* arr_b, float* arr_c, i
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    for (int i = 0; i < 10000; i++) {
-        elementwiseAddition<<<grid_dim, block_dim, 0, d_stream>>>(deviceA, deviceB, deviceC, size);
-        cudaDeviceSynchronize();
-    }
+    for (int i = 0; i < 100; i++) {
+	//float* deviceA, * deviceB, * deviceC;
+        cudaMalloc((void**)&deviceA, size * sizeof(float));
+        cudaMalloc((void**)&deviceB, size * sizeof(float));
+        cudaMalloc((void**)&deviceC, size * sizeof(float));
 
-    cudaStreamSynchronize(d_stream);
+        // Copy input arrays from host to device
+        cudaMemcpy(deviceA, arr_a, size * sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(deviceB, arr_b, size * sizeof(float), cudaMemcpyHostToDevice);
+        elementwiseAddition<<<grid_dim, block_dim, 0, d_stream>>>(deviceA, deviceB, deviceC, size);
+        cudaStreamSynchronize(d_stream);
+	//cudaDeviceSynchronize();
+    }
+    cudaDeviceSynchronize();
+    //cudaStreamSynchronize(d_stream);
 
      auto end = std::chrono::high_resolution_clock::now();
 

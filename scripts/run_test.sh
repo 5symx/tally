@@ -39,7 +39,7 @@ test_list=(
 #    "./build/tests/cublas_test"
 #    "./build/tests/elementwise"
 #    "./build/tests/test-vmm"
-    "./build/tests/elementwise"
+    "./build/tests/test-sync"
    # "./tests/cudnn_samples_v8/mnistCUDNN/mnistCUDNN"
 )
 
