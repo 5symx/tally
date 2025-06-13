@@ -900,7 +900,7 @@ void TallyServer::handle___cudaRegisterFatBinaryEnd(void *__args, iox::popo::Unt
 
 void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_server, const void* const requestPayload)
 {
-    TALLY_SPD_LOG("Received request: cudaMalloc");
+    TALLY_SPD_LOG("Received request: cudaMalloc to cuMemAlloc");
 	auto args = (struct cudaMallocArg *) __args;
 
     auto requestHeader = iox::popo::RequestHeader::fromPayload(requestPayload);
@@ -912,7 +912,8 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
 
             auto response = static_cast<cudaMallocResponse*>(responsePayload);
  
-            response->err = cudaMalloc(&(response->devPtr), args->size);
+            //response->err = cudaMalloc(&(response->devPtr), args->size);
+            response->err = (cuMemAlloc((CUdeviceptr*)&(response->devPtr), args->size) == CUDA_SUCCESS) ? cudaSuccess : cudaErrorMemoryAllocation;
 
             // Keep track that this addr is device memory
             if (response->err == cudaSuccess) {

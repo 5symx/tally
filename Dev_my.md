@@ -1,5 +1,10 @@
 # fit with L40S sm_89
 
+## build tally
+```sh
+cmake  -DCMAKE_CUDA_STANDARD=17  -DENABLE_LOGGING=ON ..
+make -j$(nproc)
+```
 ## benchmark scripts/run_test
 
 ### naive cufunction
