@@ -611,6 +611,11 @@ void TallyServer::register_ptx_transform(uint32_t cubin_uid)
     auto &transform_ptx_str = cubin_cache.get_transform_ptx_str(cubin_data, cubin_size);
     bool has_transform = transform_ptx_str != "";
     
+    //has_transform = false;
+    char log_msg[64];
+    snprintf(log_msg, sizeof(log_msg), "has_transform is %s", has_transform ? "true" : "false");
+    TALLY_SPD_LOG(log_msg);
+    
     auto &kernel_name_to_host_func_map = cubin_to_kernel_name_to_host_func_map[cubin_uid];
 
     if (cubin_to_cu_module.find(cubin_uid) != cubin_to_cu_module.end()) {

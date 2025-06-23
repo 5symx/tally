@@ -37,9 +37,9 @@ test_list=(
 #    "./build/tests/elementwise_no_ptx"
 #    "./build/tests/cuda-memcpy-test"	# cuMemAlloc
 #    "./build/tests/cublas_test"
-#    "./build/tests/elementwise"
+    "./build/tests/elementwise"
 #    "./build/tests/test-vmm"
-    "./build/tests/test-sync"
+#    "./build/tests/test-sync"  # microbench
    # "./tests/cudnn_samples_v8/mnistCUDNN/mnistCUDNN"
 )
 
@@ -65,9 +65,9 @@ for item in "${test_list[@]}"; do
 done
 
 # Run tests again with REPLACE_CUBLAS set
-for item in "${test_list[@]}"; do
-    REPLACE_CUBLAS=TRUE run_tally_test $item
-done
+#for item in "${test_list[@]}"; do
+#    REPLACE_CUBLAS=TRUE run_tally_test $item
+#done
 
 cleanup
 

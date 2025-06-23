@@ -21,6 +21,8 @@ Inside Docker:
 ```sh
 ./scripts/run_test.sh <server_version>
 ```
+result: cuda vmm > cudaMalloc 2626/3131
+
 ## Roadmap
 
 ### intercept vmm to cuda memory alloc

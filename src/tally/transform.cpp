@@ -1711,6 +1711,9 @@ std::string gen_transform_ptx(std::string &ptx_path)
             kernel_func_str = "";
         }
     }
-
+    //final_ptx_str = ""; 
+    std::ofstream out("transformed_output.ptx");
+    out << final_ptx_str;
+    out.close();
     return final_ptx_str;
 }
