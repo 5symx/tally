@@ -1,3 +1,6 @@
+import os
+os.environ["PYTORCH_NVML_BASED_CUDA_CHECK"] = "0"
+
 import torch
 import random
 import numpy as np

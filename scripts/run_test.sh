@@ -10,6 +10,7 @@ fi
 cleanup() {
     ./scripts/kill_server.sh
     ./scripts/kill_iox.sh
+    # rm -rf ~/.cache/tally/transform/*
 }
 
 run_tally_test() {
@@ -32,12 +33,12 @@ run_tally_test() {
 }
 
 test_list=(
-#    "python3 ./tests/pytorch_samples/addmm.py"
+    "python3 ./tests/pytorch_samples/addmm.py"
 #    "python3 ./tests/pytorch_samples/run-imagenet.py"
 #    "./build/tests/elementwise_no_ptx"
 #    "./build/tests/cuda-memcpy-test"	# cuMemAlloc
 #    "./build/tests/cublas_test"
-    "./build/tests/elementwise"
+#    "./build/tests/elementwise"
 #    "./build/tests/test-vmm"
 #    "./build/tests/test-sync"  # microbench
    # "./tests/cudnn_samples_v8/mnistCUDNN/mnistCUDNN"
