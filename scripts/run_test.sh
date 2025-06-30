@@ -1,6 +1,8 @@
 #!/bin/bash
 SERVER_VERSION=$1
 
+export CUDA_VISIBLE_DEVICES=0 
+
 if [ -z "$SERVER_VERSION" ]; then
     echo "Error: SERVER_VERSION is not set!"
     echo "Usage: ./run_tests.sh <server_version>"
@@ -30,15 +32,18 @@ run_tally_test() {
     ./scripts/start_client.sh $@
 
     ./scripts/kill_server.sh
-}
+} 
 
 test_list=(
-    "python3 ./tests/pytorch_samples/addmm.py"
+#    "python3 ./tests/pytorch_samples/addmm.py"
+#    "/home/ymx/llama.cpp/build/bin/llama-bench -m /home/ymx/.cache/llama.cpp/ggml-org_tinygemma3-GGUF_tinygemma3-Q8_0.gguf -ngl 99"
+     "/home/ymx/llama.cpp/build/bin/llama-simple -m /home/ymx/.cache/llama.cpp/ggml-org_tinygemma3-GGUF_tinygemma3-Q8_0.gguf -ngl 99"
+#     "/home/ymx/llama.cpp/build/bin/llama-simple"
 #    "python3 ./tests/pytorch_samples/run-imagenet.py"
 #    "./build/tests/elementwise_no_ptx"
 #    "./build/tests/cuda-memcpy-test"	# cuMemAlloc
 #    "./build/tests/cublas_test"
-#    "./build/tests/elementwise"
+#   "./build/tests/elementwise"
 #    "./build/tests/test-vmm"
 #    "./build/tests/test-sync"  # microbench
    # "./tests/cudnn_samples_v8/mnistCUDNN/mnistCUDNN"

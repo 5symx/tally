@@ -6,4 +6,4 @@ if [[ ! -z "$TALLY_HOME" ]]; then
     IOX_ROUDI_BIN=${TALLY_HOME%%/}/build/iox-roudi
 fi
 
-$IOX_ROUDI_BIN
+$IOX_ROUDI_BIN -l debug

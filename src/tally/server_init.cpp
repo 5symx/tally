@@ -47,7 +47,7 @@ void TallyServer::start_main_server() {
 
             ClientPriority client_priority(client_id, msg->priority);
             client_priority_map[client_priority] = client_id;
-
+            
             auto channel_desc_str = std::string("Tally-Communication") + std::to_string(client_id);
             char channel_desc[100];
             strcpy(channel_desc, channel_desc_str.c_str()); 

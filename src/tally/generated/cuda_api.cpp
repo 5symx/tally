@@ -33,7 +33,7 @@ void *cusparse_handle;
 		auto lib_path = path + LIB_NAME;									\
 		std::ifstream f(lib_path.c_str());									\
 		if (f.good()) {														\
-			HANDLE = dlopen(lib_path.c_str(), RTLD_LAZY);					\
+			HANDLE = dlopen(lib_path.c_str(), RTLD_NOW);					\
 			if (HANDLE)	break;												\
 		}																	\
 	}																		\
@@ -59,7 +59,7 @@ void __attribute__((constructor)) register_cuda_handles()
 	
 	auto tally_home_dir = get_tally_home_dir();
 	auto lib_nccl_path = tally_home_dir / "third_party/nccl/build/lib/libnccl.so";
-	nccl_handle = dlopen(lib_nccl_path.string().c_str(), RTLD_LAZY);
+	nccl_handle = dlopen(lib_nccl_path.string().c_str(), RTLD_NOW);
 
 	REGISTER_HANDLE(cuda_handle, LIB_CUDA_NAME);
 	REGISTER_HANDLE(cudart_handle, LIB_CUDART_NAME);

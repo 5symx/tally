@@ -54,6 +54,7 @@ void TallyServer::start_main_server() {
 
             worker_servers[client_id] = new iox::popo::UntypedServer({channel_desc, "tally", "tally"});
 
+
             std::thread t(&TallyServer::start_worker_server, TallyServer::server, client_id);
             worker_threads.push_back(std::move(t));
             
