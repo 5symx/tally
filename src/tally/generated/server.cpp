@@ -5936,11 +5936,11 @@ void TallyServer::handle_cublasDznrm2_v2_64(void *__args, iox::popo::UntypedServ
 	TALLY_SPD_LOG("Received request: cublasDznrm2_v2_64");
 	throw std::runtime_error(std::string(__FILE__) + ":" + std::to_string(__LINE__) + ": Unimplemented.");
 }
-void TallyServer::handle_cublasGemmBatchedEx(void *__args, iox::popo::UntypedServer *iox_server, const void* const requestPayload)
-{
-	TALLY_SPD_LOG("Received request: cublasGemmBatchedEx");
-	throw std::runtime_error(std::string(__FILE__) + ":" + std::to_string(__LINE__) + ": Unimplemented.");
-}
+// void TallyServer::handle_cublasGemmBatchedEx(void *__args, iox::popo::UntypedServer *iox_server, const void* const requestPayload)
+// {
+// 	TALLY_SPD_LOG("Received request: cublasGemmBatchedEx");
+// 	throw std::runtime_error(std::string(__FILE__) + ":" + std::to_string(__LINE__) + ": Unimplemented.");
+// }
 void TallyServer::handle_cublasGemmBatchedEx_64(void *__args, iox::popo::UntypedServer *iox_server, const void* const requestPayload)
 {
 	TALLY_SPD_LOG("Received request: cublasGemmBatchedEx_64");

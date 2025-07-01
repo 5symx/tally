@@ -232,6 +232,7 @@ public:
 	std::pair<partial_t, void *> cudnnRNNForward_Partial(cudnnRNNForwardArg *);
 	std::pair<partial_t, void *> cudnnBackendExecute_Partial(cudnnBackendExecuteArg *, cudnnStatus_t *err);
 	std::pair<partial_t, void *> cublasGemmEx_Partial(cublasGemmExArg *);
+	std::pair<partial_t, void *> cublasGemmBatchedEx_Partial(cublasGemmBatchedExArg *);
 	std::pair<partial_t, void *> cublasGemmStridedBatchedEx_Partial(cublasGemmStridedBatchedExArg *);
     std::pair<partial_t, void *> cublasSgemmStridedBatched_Partial(cublasSgemmStridedBatchedArg *);
 	std::pair<partial_t, void *> cudnnReduceTensor_Partial(cudnnReduceTensorArg *, void *indices);

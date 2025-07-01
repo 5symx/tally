@@ -1140,6 +1140,30 @@ struct cublasGemmStridedBatchedExArg {
     cublasGemmAlgo_t  algo;
 };
 
+struct cublasGemmBatchedExArg {
+    cublasHandle_t  handle;
+    cublasOperation_t  transa;
+    cublasOperation_t  transb;
+    int  m;
+    int  n;
+    int  k;
+    uint64_t alpha;
+    void* const*  Aarray;
+    cudaDataType  Atype;
+    int  lda;
+    void* const*  Barray;
+    cudaDataType  Btype;
+    int  ldb;
+    uint64_t  beta;
+    void* const*  Carray;
+    cudaDataType  Ctype;
+    int  ldc;
+    int  batchCount;
+    cublasComputeType_t  computeType;
+    cublasGemmAlgo_t  algo;
+};
+
+
 struct cuMemsetD8_v2Arg {
 	CUdeviceptr  dstDevice;
 	unsigned char  uc;

@@ -5496,6 +5496,212 @@ cublasStatus_t cublasGemmStridedBatchedEx(cublasHandle_t  handle, cublasOperatio
     return err;
 }
 
+cublasStatus_t cublasGemmBatchedEx_inner(cublasHandle_t  handle, cublasOperation_t  transa, cublasOperation_t  transb, int  m, int  n, int  k, const void*  alpha, const void* const Aarray[], cudaDataType  Atype, int  lda, const void*  const Barray[], cudaDataType  Btype, int  ldb, const void*  beta, void* const Carray[], cudaDataType  Ctype, int  ldc, int  batchCount, cublasComputeType_t  computeType, cublasGemmAlgo_t  algo)
+{
+    cublasStatus_t err;
+
+#if defined(RUN_LOCALLY)
+    err = lcublasGemmBatchedEx(handle, transa, transb, m, n, k, alpha, Aarray, Atype, lda, Barray, Btype, ldb, beta, Carray, Ctype, ldc, batchCount, computeType, algo);
+#else
+    uint32_t msg_len =  sizeof(MessageHeader_t) + sizeof(cublasGemmBatchedExArg);
+
+    
+    TallyClient::client->iox_client->loan(msg_len, alignof(CUDA_API_ENUM))
+    .and_then([&](auto& requestPayload) {
+        auto header = static_cast<MessageHeader_t*>(requestPayload);
+        header->api_id = CUDA_API_ENUM::CUBLASGEMMBATCHEDEX;
+        header->client_id = TallyClient::client->client_id;
+        
+        auto request = (cublasGemmBatchedExArg*) (static_cast<uint8_t*>(requestPayload) + sizeof(MessageHeader_t));
+
+        request->handle = handle;
+        request->transa = transa;
+        request->transb = transb;
+        request->m = m;
+        request->n = n;
+        request->k = k;
+        request->alpha = *((uint64_t *) alpha);    
+        request->Aarray = const_cast<void* const*>(Aarray);
+        request->Atype = Atype;
+        request->lda = lda;
+        request->Barray = const_cast<void* const*>(Barray);
+        request->Btype = Btype;
+        request->ldb = ldb;
+        request->beta = *((uint64_t *) beta);
+        request->Carray = Carray;
+        request->Ctype = Ctype;
+        request->ldc = ldc;
+        request->batchCount = batchCount;
+        request->computeType = computeType;
+        request->algo = algo;
+
+        TallyClient::client->iox_client->send(header).or_else(
+            [&](auto& error) { LOG_ERR_AND_EXIT("Could not send Request: ", error); });
+    })
+    .or_else([](auto& error) { LOG_ERR_AND_EXIT("Could not allocate Request: ", error); });
+
+    IOX_RECV_RETURN_STATUS(cublasStatus_t);
+#endif
+
+    return err;
+}
+
+cublasStatus_t cublasGemmBatchedEx(cublasHandle_t  handle, cublasOperation_t  transa, cublasOperation_t  transb, int  m, int  n, int  k, const void*  alpha, const void* const  Aarray[], cudaDataType  Atype, int  lda, const void* const  Barray[], cudaDataType  Btype, int  ldb, const void*  beta, void* const  Carray[], cudaDataType  Ctype, int  ldc, int  batchCount, cublasComputeType_t  computeType, cublasGemmAlgo_t  algo)
+{
+	TALLY_SPD_LOG("cublasGemmBatchedEx hooked");
+    TALLY_CLIENT_PROFILE_START;
+    IOX_CLIENT_ACQUIRE_LOCK;
+
+    bool launched = false;
+    cublasStatus_t err;
+
+    if (REPLACE_CUBLAS) {
+        TALLY_SPD_LOG("cublasGemmBatchedEx not implemented for REPLACE_CUBLAS TODO");
+        throw std::runtime_error("Fail to replace cublasGemmBatchedEx with cutlass implementation");
+
+        auto cublasCtx = cublas_tracer.get_cublasCtx(handle);
+        auto math_mode = cublasCtx.mode;
+        auto stream = cublasCtx.stream;
+
+//         if (math_mode == CUBLAS_DEFAULT_MATH) {
+
+//             if (Atype == CUDA_R_16F &&
+//                 Btype == CUDA_R_16F &&
+//                 Ctype == CUDA_R_16F) {
+
+//                 if (computeType == CUBLAS_COMPUTE_32F) {
+                
+//                     TALLY_SPD_LOG("cublasGemmStridedBatchedEx replaced with cutlassStridedBatchedGemm_f16");
+//                     load_tally_cutlass_lib();
+
+//                     auto cutlass_transa = cublas_op_to_cutlass_op(transa);
+//                     auto cutlass_transb = cublas_op_to_cutlass_op(transb);
+
+// #if defined(VERIFY_CORRECTNESS)
+
+//                     TALLY_LOG_PROFILE("");
+//                     TALLY_SPD_LOG_PROFILE("cublasGemmStridedBatchedEx arguments:");
+//                     TALLY_SPD_LOG_PROFILE("Dim: " + std::to_string(m) + ", " + std::to_string(n) + ", " + std::to_string(k));
+//                     TALLY_SPD_LOG_PROFILE("ld: " + std::to_string(lda) + ", " + std::to_string(ldb) + ", " + std::to_string(ldc));
+//                     TALLY_SPD_LOG_PROFILE("batchCount: " + std::to_string(batchCount));
+//                     TALLY_SPD_LOG_PROFILE("Precision: f16");
+
+//                     // Copy array C
+//                     half *C_copy;
+//                     int num_elems = (batchCount - 1) * strideC + m * n;
+//                     int size_bytes = num_elems * sizeof(half);
+//                     cudaMalloc(&C_copy, size_bytes);
+
+//                     // warmup
+//                     cublasGemmStridedBatchedEx_inner(handle, transa, transb, m, n, k, alpha, A, Atype, lda, strideA, B, Btype, ldb, strideB, beta, C_copy, Ctype, ldc, strideC, batchCount, computeType, algo);
+//                     cutlassStridedBatchedGemm_f16(cutlass_transa, cutlass_transb, m, n, k, *((float *)alpha), (half *)A, lda, strideA, (half *)B, ldb, strideB, (half *)C_copy, ldc, strideC, *((float *)beta), batchCount, stream);
+
+//                     cudaMemcpy(C_copy, C, size_bytes, cudaMemcpyDeviceToDevice);
+
+//                     cudaDeviceSynchronize();
+//                     spdlog::set_level(spdlog::level::warn);
+//                     auto start = std::chrono::high_resolution_clock::now();
+// #endif
+
+//                     auto cuda_err = cutlassStridedBatchedGemm_f16(cutlass_transa, cutlass_transb, m, n, k, *((float *)alpha), (half *)A, lda, strideA, (half *)B, ldb, strideB, (half *)C, ldc, strideC, *((float *)beta), batchCount, stream);
+
+//                     if (!cuda_err) {
+//                         err = CUBLAS_STATUS_SUCCESS;
+//                     } else {
+//                         err = CUBLAS_STATUS_INVALID_VALUE;
+//                     }
+
+//                     launched = true;
+
+// #if defined(VERIFY_CORRECTNESS)
+
+//                     cudaDeviceSynchronize();
+//                     auto end = std::chrono::high_resolution_clock::now();
+//                     std::chrono::duration<double, std::milli> duration = end - start;
+//                     auto cutlass_ms = duration.count();
+//                     spdlog::set_level(spdlog::level::info);
+
+//                     start = std::chrono::high_resolution_clock::now();
+
+//                     err = cublasGemmStridedBatchedEx_inner(handle, transa, transb, m, n, k, alpha, A, Atype, lda, strideA, B, Btype, ldb, strideB, beta, C_copy, Ctype, ldc, strideC, batchCount, computeType, algo);
+                    
+//                     cudaDeviceSynchronize();
+//                     end = std::chrono::high_resolution_clock::now();
+//                     duration =  end - start;
+//                     auto cublas_ms = duration.count();
+
+//                     TALLY_SPD_LOG_PROFILE("cutlassStridedBatchedGemm_f16: " + std::to_string(cutlass_ms) + "ms");
+//                     TALLY_SPD_LOG_PROFILE("cublasGemmStridedBatchedEx: " + std::to_string(cublas_ms) + "ms");
+
+//                     if ((cublas_ms / cutlass_ms) < 0.5) {
+//                         TALLY_SPD_LOG_PROFILE("cutlass performance does not match at least 50% of cublas");
+//                     } else if ((cublas_ms / cutlass_ms) < 0.8) {
+//                         TALLY_SPD_LOG_PROFILE("cutlass performance does not match at least 80% of cublas");
+//                     } else {
+//                         TALLY_SPD_LOG_PROFILE("cutlass performance is comparable with cublas");
+//                     }
+//                     TALLY_LOG_PROFILE("");
+
+//                     half *h_c_cublas = (half *) malloc(size_bytes);
+//                     half *h_c_cutlass = (half *) malloc(size_bytes);
+
+//                     cudaMemcpy(h_c_cublas, C_copy, size_bytes, cudaMemcpyDeviceToHost);
+//                     cudaMemcpy(h_c_cutlass, C, size_bytes, cudaMemcpyDeviceToHost);
+
+//                     bool results_match = true;
+
+//                     for (int i = 0; i < num_elems; i++) {
+
+//                         float cublas_val =  __half2float(h_c_cublas[i]);
+//                         float cutlass_val = __half2float(h_c_cutlass[i]);
+
+//                         if (!numerically_close(cublas_val, cutlass_val)) {
+//                             results_match = false;
+//                             std::cout << "cublas_val: " << cublas_val << std::endl;
+//                             std::cout << "cutlass_val: " << cutlass_val << std::endl;
+//                             break;
+//                         }
+//                     }
+
+//                     if (!results_match) {
+//                         TALLY_SPD_WARN("cublas and cutlass results do not match.");
+//                         // exit(1);
+//                     } else {
+//                         TALLY_SPD_LOG("cutlassStridedBatchedGemm_f32 results match with cublasSgemmStridedBatched");
+//                     }
+                    
+//                     free(h_c_cublas);
+//                     free(h_c_cutlass);
+//                     cudaFree(C_copy);
+// #endif
+
+//                 } else {
+//                     TALLY_SPD_WARN("computeType type is not CUBLAS_COMPUTE_32F");
+//                 }
+
+//             } else {
+//                 TALLY_SPD_WARN("A/B/C type is not CUDA_R_16F");
+//             }
+
+//         } else {
+//             TALLY_SPD_WARN("math_mode is not CUBLAS_DEFAULT_MATH")
+//         }
+
+        if (!launched) {
+            TALLY_SPD_WARN("Fail to replace cublasGemmStridedBatchedEx with cutlass implementation");
+            throw std::runtime_error("Fail to replace cublasGemmStridedBatchedEx with cutlass implementation");
+        }
+    }
+    
+    if (!launched) {
+        err = cublasGemmBatchedEx_inner(handle, transa, transb, m, n, k, alpha, Aarray, Atype, lda, Barray, Btype, ldb, beta, Carray, Ctype, ldc, batchCount, computeType, algo);
+    }
+
+    TALLY_CLIENT_PROFILE_END;
+    
+    return err;
+}
+
 CUresult cuMemsetD8_v2(CUdeviceptr  dstDevice, unsigned char  uc, size_t  N)
 {
 	TALLY_SPD_LOG("cuMemsetD8_v2 hooked");

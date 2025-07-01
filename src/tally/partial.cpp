@@ -985,6 +985,46 @@ std::pair<partial_t, void *> TallyServer::cublasGemmStridedBatchedEx_Partial(cub
     return std::make_pair(partial, nullptr);
 }
 
+
+std::pair<partial_t, void *> TallyServer::cublasGemmBatchedEx_Partial(cublasGemmBatchedExArg *args)
+{
+    auto partial = [this, args] (PARTIAL_ARGUMENTS) {
+
+        auto err = cublasGemmBatchedEx(
+            args->handle,
+            args->transa,
+            args->transb,
+            args->m,
+            args->n,
+            args->k,
+            &(args->alpha),
+            args->Aarray,
+            args->Atype,
+            args->lda,
+            args->Barray,
+            args->Btype,
+            args->ldb,
+            &(args->beta),
+            args->Carray,
+            args->Ctype,
+            args->ldc,
+            args->batchCount,
+            args->computeType,
+            args->algo
+        );
+
+        CHECK_ERR_LOG_AND_EXIT(err, "Fail to launch kernel.");
+
+        if (!err) {
+            return CUDA_SUCCESS;
+        } else {
+            return CUDA_ERROR_INVALID_VALUE;
+        }
+    };
+
+    return std::make_pair(partial, nullptr);
+}
+
 std::pair<partial_t, void *> TallyServer::cublasSgemmStridedBatched_Partial(cublasSgemmStridedBatchedArg *args)
 {
     auto partial = [this, args] (PARTIAL_ARGUMENTS) {

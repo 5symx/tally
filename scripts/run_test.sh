@@ -36,14 +36,11 @@ run_tally_test() {
 
 test_list=(
 #    "python3 ./tests/pytorch_samples/addmm.py"
-#    "/home/ymx/llama.cpp/build/bin/llama-bench -m /home/ymx/.cache/llama.cpp/ggml-org_tinygemma3-GGUF_tinygemma3-Q8_0.gguf -ngl 99"
-     "/home/ymx/llama.cpp/build/bin/llama-simple -m /home/ymx/.cache/llama.cpp/ggml-org_tinygemma3-GGUF_tinygemma3-Q8_0.gguf -ngl 99"
-#     "/home/ymx/llama.cpp/build/bin/llama-simple"
 #    "python3 ./tests/pytorch_samples/run-imagenet.py"
-#    "./build/tests/elementwise_no_ptx"
-#    "./build/tests/cuda-memcpy-test"	# cuMemAlloc
-#    "./build/tests/cublas_test"
+     "/home/ymx/llama.cpp/build/bin/llama-simple -m /home/ymx/.cache/llama.cpp/ggml-org_tinygemma3-GGUF_tinygemma3-Q8_0.gguf -ngl 99"
+#   "./build/tests/cublas_test"
 #   "./build/tests/elementwise"
+#    "./build/tests/cuda-memcpy-test"	# cuMemAlloc
 #    "./build/tests/test-vmm"
 #    "./build/tests/test-sync"  # microbench
    # "./tests/cudnn_samples_v8/mnistCUDNN/mnistCUDNN"

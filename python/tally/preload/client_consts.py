@@ -440,6 +440,7 @@ public:
 	std::pair<partial_t, void *> cublasGemmStridedBatchedEx_Partial(cublasGemmStridedBatchedExArg *);
     std::pair<partial_t, void *> cublasSgemmStridedBatched_Partial(cublasSgemmStridedBatchedArg *);
 	std::pair<partial_t, void *> cudnnReduceTensor_Partial(cudnnReduceTensorArg *, void *indices);
+    std::pair<partial_t, void *> cublasGemmBatchedEx_Partial(cublasGemmBatchedExArg *);
 
 """
 
@@ -523,6 +524,7 @@ SPECIAL_CLIENT_PRELOAD_FUNCS = [
     "cuStreamCreate",
     "cuMemsetD8_v2",
     "cublasGemmStridedBatchedEx",
+    "cublasGemmBatchedEx"
     "cublasGemmEx",
     "cuStreamCreateWithPriority",
     "cudaStreamCreate",
