@@ -145,9 +145,13 @@ __host__ void runElementwiseAddition(float* arr_a, float* arr_b, float* arr_c, i
     cudaDeviceProp properties;
 
     cudaGetDevice(&device); // Get device ID
-    cudaGetDeviceProperties(&properties, device); // Get device properties
+    // Set the device explicitly to device 1
+    // int device = 1;
+    // cudaSetDevice(device);
 
-    std::cout << "Compute capability: " << properties.major << "." << properties.minor << std::endl;
+    // cudaGetDeviceProperties(&properties, device); // Get device properties
+
+    // std::cout << "Compute capability: " << properties.major << "." << properties.minor << std::endl;
 
     // Allocate memory on the device (GPU)
     float* deviceA, * deviceB, * deviceC;

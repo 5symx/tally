@@ -3872,6 +3872,48 @@ void TallyServer::handle_cublasGemmStridedBatchedEx(void *__args, iox::popo::Unt
             [&](auto& error) { LOG_ERR_AND_EXIT("Could not allocate Response: ", error); });
 }
 
+
+void TallyServer::handle_cublasGemmBatchedEx(void *__args, iox::popo::UntypedServer *iox_server, const void* const requestPayload)
+{
+	TALLY_SPD_LOG("Received request: cublasGemmBatchedEx");
+	auto args = (struct cublasGemmBatchedExArg *) __args;
+    auto msg_header = static_cast<const MessageHeader_t*>(requestPayload);
+    int32_t client_id = msg_header->client_id;
+
+    auto partial_and_args = cublasGemmBatchedEx_Partial(args);
+
+    cudaStream_t stream;
+    cublasGetStream(args->handle, &stream);
+
+    increment_client_queue_size(client_id);
+    client_data_all[client_id].kernel_dispatch_queue.enqueue(
+        KernelLaunchWrapper(
+            partial_and_args.first,
+            partial_and_args.second,
+            true,
+            CudaLaunchCall(0, 0, 0),
+            stream,
+            0
+        )
+    );
+
+    wait_until_launch_queue_empty(client_id);
+
+    auto requestHeader = iox::popo::RequestHeader::fromPayload(requestPayload);
+    iox_server->loan(requestHeader, sizeof(cublasStatus_t), alignof(cublasStatus_t))
+        .and_then([&](auto& responsePayload) {
+
+            auto response = static_cast<cublasStatus_t*>(responsePayload);
+            *response = CUBLAS_STATUS_SUCCESS;
+
+            iox_server->send(response).or_else(
+                [&](auto& error) { LOG_ERR_AND_EXIT("Could not send Response: ", error); });
+        })
+        .or_else(
+            [&](auto& error) { LOG_ERR_AND_EXIT("Could not allocate Response: ", error); });
+}
+
+
 void TallyServer::handle_cuMemsetD8_v2(void *__args, iox::popo::UntypedServer *iox_server, const void* const requestPayload)
 {
 	TALLY_SPD_LOG("Received request: cuMemsetD8_v2");

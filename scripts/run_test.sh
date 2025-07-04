@@ -1,7 +1,7 @@
 #!/bin/bash
 SERVER_VERSION=$1
 
-export CUDA_VISIBLE_DEVICES=0 
+export CUDA_VISIBLE_DEVICES="0"
 
 if [ -z "$SERVER_VERSION" ]; then
     echo "Error: SERVER_VERSION is not set!"
@@ -29,7 +29,9 @@ run_tally_test() {
     fi
 
     # Launch client process
-    ./scripts/start_client.sh $@
+    ./scripts/start_client.sh "$@"
+
+    # ./scripts/start_client.sh "$@"
 
     ./scripts/kill_server.sh
 } 
@@ -37,7 +39,8 @@ run_tally_test() {
 test_list=(
 #    "python3 ./tests/pytorch_samples/addmm.py"
 #    "python3 ./tests/pytorch_samples/run-imagenet.py"
-     "/home/ymx/llama.cpp/build/bin/llama-simple -m /home/ymx/.cache/llama.cpp/ggml-org_tinygemma3-GGUF_tinygemma3-Q8_0.gguf -ngl 99"
+    '/home/ymx/llama.cpp/build/bin/llama-simple -m /home/ymx/.cache/llama.cpp/ggml-org_gemma-3-1b-it-GGUF_gemma-3-1b-it-Q4_K_M.gguf -ngl 99 "once upon a time"'
+#    '/home/ymx/llama.cpp/build/bin/llama-cli -m /home/ymx/.cache/llama.cpp/ggml-org_tinygemma3-GGUF_tinygemma3-Q8_0.gguf -ngl 99 -no-cnv --prompt "once upon a time" -n 100 '
 #   "./build/tests/cublas_test"
 #   "./build/tests/elementwise"
 #    "./build/tests/cuda-memcpy-test"	# cuMemAlloc
@@ -50,9 +53,26 @@ test_list=(
 trap cleanup ERR
 set -e
 
+apt-get install -y libcurl4-openssl-dev 
+
+cd ../llama.cpp &&  \
+cmake -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
+      -DCUDAToolkit_ROOT=/usr/local/cuda \
+      -DGGML_CUDA=ON \
+      -DCMAKE_CUDA_ARCHITECTURES="86" \
+      -DGGML_CUDA_NO_VMM=ON \
+      -DGGML_CUDA_FORCE_CUBLAS=ON \
+      -DGGML_CUDA_F16=ON \
+      -DGGML_CUDA_FA=OFF \
+      -DBUILD_SHARED_LIBS=1  \
+      -DGGML_CUDA_GRAPHS=OFF && \
+cmake --build build --config Release -j$(nproc) && \
+cd ../tally
+
 # Build tally and tests
 make SERVER_VERSION=$SERVER_VERSION
 #cd tests && cd cudnn_samples_v8 && make && cd .. && cd ..
+
 ./scripts/kill_server.sh & 
 sleep 5
 
@@ -64,7 +84,7 @@ sleep 5
 
 # Run tests with tally-server-client
 for item in "${test_list[@]}"; do
-    run_tally_test $item
+    run_tally_test "$item"
 done
 
 # Run tests again with REPLACE_CUBLAS set

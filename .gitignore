@@ -47,6 +47,7 @@ coverage.xml
 *.pot
 *.ptx
 *.nsys-rep
+*.qdstrm
 # Sphinx documentation
 docs/_build/
 

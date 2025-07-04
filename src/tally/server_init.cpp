@@ -16,6 +16,8 @@
 #include <tally/generated/msg_struct.h>
 #include <tally/generated/server.h>
 
+#include <cuda_profiler_api.h>
+
 TallyServer *TallyServer::server = new TallyServer();
 
 TallyServer::TallyServer()
@@ -26,6 +28,8 @@ TallyServer::TallyServer()
 TallyServer::~TallyServer(){}
 
 void TallyServer::start_main_server() {
+    
+
 
     iox::runtime::PoshRuntime::initRuntime(APP_NAME);
     iox::popo::UntypedServer handshake_server({"Tally", "handshake", "event"});
@@ -102,6 +106,7 @@ void TallyServer::start_main_server() {
     }
 
     TallyCache::cache->save_transform_cache();
+    
 }
 
 int32_t TallyServer::get_client_priority(int32_t client_id)
@@ -143,6 +148,8 @@ void TallyServer::increment_client_queue_size(int32_t client_id)
 }
 
 void TallyServer::start_worker_server(int32_t client_id) {
+
+    cudaProfilerStart();
 
     implicit_init_cuda_ctx();
 
@@ -194,6 +201,8 @@ void TallyServer::start_worker_server(int32_t client_id) {
 
     threads_running_map[client_id] = false;
     TALLY_SPD_LOG_ALWAYS("Tally worker server has exited ...");
+    cudaProfilerStop();
+    
 }
 
 void TallyServer::launch_and_measure_kernel(KernelLaunchWrapper &kernel_wrapper, int32_t client_id,
@@ -676,6 +685,7 @@ void TallyServer::handle_cudaLaunchKernel(void *__args, iox::popo::UntypedServer
         .or_else(
             [&](auto& error) { LOG_ERR_AND_EXIT("Could not allocate Response: ", error); });
 }
+
 
 void TallyServer::handle_cuLaunchKernel(void *__args, iox::popo::UntypedServer *iox_server, const void* const requestPayload)
 {

@@ -207,6 +207,8 @@ public:
 
     // Return a partial function to be scheduled by scheduler
     std::pair<partial_t, void *> cudaLaunchKernel_Partial(const void *, dim3, dim3, size_t, cudaStream_t, char *);
+	// std::pair<partial_t, void *> cudaLaunchKernel_Partial(cuLaunchKernelArg *);
+	// std::pair<partial_t, void *> cudaLaunchKernel_Partial(cudaLaunchKernelArg *);
 	std::pair<partial_t, void *> cublasSgemm_v2_Partial(cublasSgemm_v2Arg *);
 	std::pair<partial_t, void *> cudnnRNNBackwardWeights_Partial(cudnnRNNBackwardWeightsArg *);
 	std::pair<partial_t, void *> cudnnRNNBackwardData_Partial(cudnnRNNBackwardDataArg *);

@@ -26,6 +26,11 @@ void implicit_init_cuda_ctx()
 {
     int deviceCount = 0;
     cudaGetDeviceCount(&deviceCount);
+    // if (deviceCount > 1) {
+    //     cudaSetDevice(1);  // 👈 Switch to device 1
+    // } else {
+    //     std::cerr << "Only " << deviceCount << " device(s) available. Cannot set to device 1.\n";
+    // }
 }
 
 void register_cuda_specs()

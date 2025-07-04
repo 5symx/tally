@@ -593,6 +593,7 @@ cudaError_t cudaMemcpy(void * dst, const void * src, size_t  count, enum cudaMem
 cudaError_t cudaMemcpyAsync(void * dst, const void * src, size_t  count, enum cudaMemcpyKind  kind, cudaStream_t  stream)
 {
     TALLY_SPD_LOG("cudaMemcpyAsync hooked");
+    
     TALLY_CLIENT_PROFILE_START;
     IOX_CLIENT_ACQUIRE_LOCK;
 
@@ -604,8 +605,10 @@ cudaError_t cudaMemcpyAsync(void * dst, const void * src, size_t  count, enum cu
     uint32_t msg_len;
     
     if (kind == cudaMemcpyHostToDevice) {
+        TALLY_SPD_LOG("H2D");
         msg_len = sizeof(MessageHeader_t) + sizeof(cudaMemcpyAsyncArg) + count;
     } else if (kind == cudaMemcpyDeviceToHost || kind == cudaMemcpyDeviceToDevice){
+        TALLY_SPD_LOG("D2HD");
         msg_len = sizeof(MessageHeader_t) + sizeof(cudaMemcpyAsyncArg);
     } else {
         throw std::runtime_error("Unknown memcpy kind!");
@@ -654,6 +657,7 @@ cudaError_t cudaMemcpyAsync(void * dst, const void * src, size_t  count, enum cu
     LAST_CUDA_ERR = err;
     return err;
 }
+
 
 cudaError_t cudaLaunchKernel(const void * func, dim3  gridDim, dim3  blockDim, void ** args, size_t  sharedMem, cudaStream_t  stream)
 {
