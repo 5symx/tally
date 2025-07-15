@@ -18,6 +18,19 @@ target_link_libraries(elementwise
     cudart
 )
 
+add_executable(test_sync cuda_samples_basic/test-sync.cu)
+
+set_target_properties(test_sync PROPERTIES
+    CUDA_ARCHITECTURES ${CUDA_ARCH_LIST}
+    CUDA_RUNTIME_LIBRARY Shared
+)
+
+target_link_libraries(test_sync
+    cuda
+    cudart
+)
+
+
 add_executable(elementwise_no_ptx cuda_samples_basic/elementwise_no_ptx.cu)
 
 set_target_properties(elementwise_no_ptx PROPERTIES

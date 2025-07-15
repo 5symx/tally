@@ -267,6 +267,13 @@ public:
 	moodycamel::ReaderWriterQueue<KernelLaunchWrapper> kernel_dispatch_queue;
 	std::atomic<uint32_t> queue_size = 0;
 
+    // cudaStream_t copy_H2D_queue = nullptr; // add copy queue
+    // std::atomic<uint32_t> malloc_count = 0;
+    cudaEvent_t all_h2d_done_event;
+    bool finish_init = false;
+    cudaStream_t copy_stream = nullptr;
+    
+
 	uint32_t *curr_idx_arr;
 
     cudaStream_t default_stream = nullptr;

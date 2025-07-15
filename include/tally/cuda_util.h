@@ -36,6 +36,26 @@ extern uint32_t FATBIN_MAGIC_NUMBER;
 struct mem_region {
     void *addr;
     size_t size;
+    bool reuse_init_memory;
+    size_t init_memory_id;
+
+    // Constructor that only takes addr and size
+    mem_region(void* _addr, size_t _size) :
+        addr(_addr),
+        size(_size),
+        reuse_init_memory(false), // Default to false if not provided
+        init_memory_id(0)         // Default to 0 or some invalid ID
+    {}
+
+    // Or a constructor that takes all of them
+    mem_region(void* _addr, size_t _size, bool _reuse, size_t _id) :
+        addr(_addr),
+        size(_size),
+        reuse_init_memory(_reuse),
+        init_memory_id(_id)
+    {}
+
+
 };
 
 struct CudaLaunchMetadata {
@@ -574,5 +594,6 @@ void register_kernels_from_ptx_fatbin(
 
 std::map<std::string, std::vector<uint32_t>> get_kernel_names_and_param_sizes_from_elf(std::string elf_path);
 std::map<std::string, std::vector<uint32_t>> get_kernel_names_and_param_sizes_from_elf_str(std::string elf_str);
+void* get_addr_by_init_memory_id(const std::vector<mem_region>& dev_addr_map, size_t target_id);
 
 #endif // TALLY_CUDA_UTIL_H

@@ -19,7 +19,8 @@ fi
 
 DEBUG_FLAGS="--cap-add=SYS_PTRACE --security-opt seccomp=unconfined"
 DOCKER_MAP="-v /home/ymx/tally-bench:/home/ymx/tally-bench -v /home/ymx/llama.cpp:/home/ymx/llama.cpp -v $PWD:$PWD -w $PWD -v /etc/passwd:/etc/passwd -v /etc/group:/etc/group -v \
-  $ROOT_DIR:/source -v /home/ymx/.cache:/home/ymx/.cache -v /home/ymx/tally/config/roudi_config.toml:/etc/iceoryx/roudi_config.toml"
+  $ROOT_DIR:/source -v /home/ymx/.cache:/home/ymx/.cache -v /home/ymx/tally/config/roudi_config.toml:/etc/iceoryx/roudi_config.toml \
+  -v /home/ymx/my_tmp:/home/ymx/my_tmp"
 
 DOCKER_FLAGS="--rm ${DOCKER_MAP}  -e TALLY_HOME=/home/ymx/tally -e HOME=/home/ymx --network=host --user root --ipc=host --security-opt seccomp=unconfined ${DEBUG_FLAGS}"
 if [[ ${DOCKER_IMAGE} == *"rocm"* ]]; then
@@ -28,10 +29,11 @@ elif [[ ${DOCKER_IMAGE} == *"cuda"* ]]; then
     DOCKER_FLAGS="${DOCKER_FLAGS} --gpus all"
 elif [[ ${DOCKER_IMAGE} == *"tally"* ]]; then
     DOCKER_FLAGS="${DOCKER_FLAGS} --runtime=nvidia \
-    -e NVIDIA_VISIBLE_DEVICES=1 \
     -e CUDA_MPS_PIPE_DIRECTORY=/home/ymx \
     -e CUDA_MPS_LOG_DIRECTORY=/home/ymx \
-    --privileged"
+    -e NVIDIA_VISIBLE_DEVICES=1 \
+    -e TMPDIR=/home/ymx/my_tmp \
+    "
 fi
 
 if [ "${RUN_DOCKER_INTERACTIVE}" -eq 1 ]; then

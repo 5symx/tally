@@ -29,6 +29,7 @@ public:
 
     static TallyClient *client;
     int32_t client_id;
+    
     bool has_connected = false;
 
     std::recursive_mutex iox_mtx;
@@ -67,6 +68,7 @@ public:
                 .and_then([&](auto& requestPayload) {
 
                     auto request = static_cast<HandshakeMessgae*>(requestPayload);
+                    request->header.client_id = client_id;
                     request->client_id = client_id;
                     request->priority = priority;
 
@@ -89,7 +91,8 @@ public:
 
             })) {};
 
-            auto channel_desc_str = std::string("Tally-Communication") + std::to_string(client_id);
+            // auto channel_desc_str = std::string("Tally-Communication") + std::to_string(client_id);
+            auto channel_desc_str = std::string("Tally-Main");
             char channel_desc[100];
             strcpy(channel_desc, channel_desc_str.c_str()); 
             iox_client = new iox::popo::UntypedClient({channel_desc, "tally", "tally"});

@@ -262,3 +262,13 @@ std::map<std::string, std::vector<uint32_t>> get_kernel_names_and_param_sizes_fr
     
     return get_kernel_names_and_param_sizes_from_elf_str(elf_code_str);
 }
+
+void* get_addr_by_init_memory_id(const std::vector<mem_region>& dev_addr_map, size_t target_id) {
+    // Iterate through the vector
+    for (const auto& region : dev_addr_map) {
+        if (region.reuse_init_memory && region.init_memory_id == target_id) {
+            return region.addr; // Found it! Return the address
+        }
+    }
+    return nullptr; // Not found
+}

@@ -26,6 +26,9 @@
     #define TALLY_SPD_LOG(msg)
 #endif
 
+#define TALLY_SPD_LOG_VALUE(fmt, ...) \
+    spdlog::info(fmt, __VA_ARGS__);
+
 #if defined(ENABLE_LOGGING) || defined(ENABLE_PERFORMANCE_LOGGING)
     #define TALLY_SPD_LOG_PROFILE(msg) \
         spdlog::info(msg);

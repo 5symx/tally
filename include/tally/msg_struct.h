@@ -38,19 +38,26 @@ struct __cudaRegisterFunctionArg {
     char data[]; // kernel_func_name
 };
 
+typedef struct MessageHeader {
+    CUDA_API_ENUM api_id;
+    int32_t client_id;
+} MessageHeader_t;
+
+typedef struct MessageHeaderID {
+    int32_t client_id;
+} MessageHeaderID_t;
+
 struct HandshakeMessgae {
+    MessageHeaderID_t header;
     int32_t client_id;
     int32_t priority;
 };
 
 struct HandshakeResponse {
+    MessageHeader_t header;
     bool success;
 };
 
-typedef struct MessageHeader {
-    CUDA_API_ENUM api_id;
-    int32_t client_id;
-} MessageHeader_t;
 
 struct cudaMallocArg {
 	void ** devPtr;

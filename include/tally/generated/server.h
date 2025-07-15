@@ -62,6 +62,22 @@ public:
 	moodycamel::ReaderWriterQueue<KernelLaunchWrapper> kernel_dispatch_queue;
 	std::atomic<uint32_t> queue_size = 0;
 
+	// cudaStream_t copy_H2D_queue = nullptr; // add copy queue
+    // std::atomic<uint32_t> malloc_count = 0;
+    cudaEvent_t all_h2d_done_event = nullptr;
+    bool first_init = false;
+    cudaStream_t copy_stream = nullptr;
+
+	bool finish_init_graph = false;
+	cudaStream_t init_stream = nullptr;
+	cudaGraph_t graph_init = nullptr;
+	cudaGraphExec_t graphExec = nullptr;
+
+	std::atomic<bool> finish_first = false;
+	// std::atomic<bool> finish_first_global(false);
+	bool replay_graph = false;
+	cudaStream_t replay_stream = nullptr;
+
 	uint32_t *curr_idx_arr;
 
     cudaStream_t default_stream = nullptr;
@@ -94,6 +110,22 @@ public:
     static TallyServer *server;
 
 	bool signal_exit = false;
+
+	cudaGraph_t graph_init = nullptr;
+	cudaGraphExec_t graphExec = nullptr;
+	bool finish_init_graph = false;
+	std::atomic<bool> finish_first = false;
+	std::atomic<bool> is_profile = false;
+
+	//add 
+	std::atomic<bool> finish_init = false;
+	std::atomic<bool> first_round = true;
+	std::vector<mem_region> dev_addr_map;
+	int32_t rc_mem_Size = 0;
+	int32_t init_mem_Size = 0;
+
+
+
 
 	// ================== Per-client state ===================
 	std::map<int32_t, ClientData> client_data_all;
@@ -143,6 +175,12 @@ public:
 	// Performance cache to use at runtime
 	std::unordered_map<CudaLaunchCallConfig, CudaLaunchCallConfigResult> single_kernel_perf_map;
 	std::unordered_map<CudaLaunchCall, CudaLaunchCallConfigResult> single_kernel_chosen_config_map;
+
+	//add
+	void handle_cuda_allocation(cudaMallocResponse* response, cudaMallocArg* args,
+                            std::vector<mem_region>& dev_addr_map,
+                            int32_t& current_id_counter,
+                            bool reuse_flag);
 
 	int32_t get_client_priority(int32_t client_id);
 	int32_t get_client_stream_priority(int32_t client_id);
@@ -200,6 +238,9 @@ public:
     void start_scheduler();
     void start_main_server();
     void start_worker_server(int32_t client_id);
+
+	//add
+	void reset_worker_server(int32_t client_id);
 
 	void increment_client_queue_size(int32_t client_id);
 	void wait_until_launch_queue_empty(int32_t client_id);

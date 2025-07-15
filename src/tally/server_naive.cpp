@@ -28,8 +28,6 @@ TallyServer::TallyServer()
 TallyServer::~TallyServer(){}
 
 void TallyServer::start_main_server() {
-    
-
 
     iox::runtime::PoshRuntime::initRuntime(APP_NAME);
     iox::popo::UntypedServer handshake_server({"Tally", "handshake", "event"});
@@ -166,6 +164,7 @@ void TallyServer::start_worker_server(int32_t client_id) {
     }
 
     CHECK_CUDA_ERROR(cudaMalloc((void **)&client_meta.curr_idx_arr, sizeof(uint32_t) * CUDA_NUM_SM * 20));
+
     client_add_stream(client_id, client_meta.default_stream);
 
     TALLY_SPD_LOG_ALWAYS("Tally worker server is up ...");
@@ -202,7 +201,7 @@ void TallyServer::start_worker_server(int32_t client_id) {
     threads_running_map[client_id] = false;
     TALLY_SPD_LOG_ALWAYS("Tally worker server has exited ...");
     cudaProfilerStop();
-    
+
 }
 
 void TallyServer::launch_and_measure_kernel(KernelLaunchWrapper &kernel_wrapper, int32_t client_id,
@@ -658,6 +657,7 @@ void TallyServer::handle_cudaLaunchKernel(void *__args, iox::popo::UntypedServer
 
     auto kernel_name = host_func_to_demangled_kernel_name_map[server_func_addr];
     TALLY_SPD_LOG(kernel_name);
+
     
     auto partial_and_args = cudaLaunchKernel_Partial(server_func_addr, args->gridDim, args->blockDim, args->sharedMem, stream, args->params);
 
@@ -2925,6 +2925,7 @@ void TallyServer::handle_cudaDeviceSynchronize(void *__args, iox::popo::UntypedS
 
             wait_until_launch_queue_empty(client_id);
 
+
             // Instead of calling cudaDeviceSynchronize, only synchronize all streams of the client
             auto &client_streams = client_data_all[client_id].streams;
             
@@ -2960,8 +2961,10 @@ void TallyServer::handle_cudaStreamSynchronize(void *__args, iox::popo::UntypedS
         .and_then([&](auto& responsePayload) {
 
             wait_until_launch_queue_empty(client_id);
-            
+
             auto response = static_cast<cudaError_t*>(responsePayload);
+
+           
             *response = cudaStreamSynchronize(
 				stream
             );
