@@ -4,7 +4,14 @@
 #include <vector>
 
 #include <tally/util.h>
-#include <tally/client.h>
+
+#ifdef USE_NAIVE_CLIENT
+    #include <tally/client_init.h>
+#else
+    #include <tally/client.h>
+#endif
+
+
 #include <tally/generated/cuda_api.h>
 
 TallyClient *TallyClient::client;

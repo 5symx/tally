@@ -78,6 +78,9 @@ public:
 	bool replay_graph = false;
 	cudaStream_t replay_stream = nullptr;
 
+	//add
+	int32_t rc_mem_Size = 0;
+
 	uint32_t *curr_idx_arr;
 
     cudaStream_t default_stream = nullptr;
@@ -179,6 +182,7 @@ public:
 	//add
 	void handle_cuda_allocation(cudaMallocResponse* response, cudaMallocArg* args,
                             std::vector<mem_region>& dev_addr_map,
+							std::vector<mem_region>& client_dev_addr_map,
                             int32_t& current_id_counter,
                             bool reuse_flag);
 

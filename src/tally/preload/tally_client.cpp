@@ -37,7 +37,13 @@
 #include "tally/msg_struct.h"
 #include "tally/generated/msg_struct.h"
 #include "tally/transform.h"
-#include "tally/client.h"
+// #include "tally/client.h"
+#ifdef USE_NAIVE_CLIENT
+    #include "tally/client_init.h"
+#else
+    #include "tally/client.h"
+#endif
+
 #include "tally/generated/cuda_api.h"
 #include "tally/generated/cuda_api_enum.h"
 #include "tally/cublas_tracer.h"

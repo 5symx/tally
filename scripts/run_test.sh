@@ -18,8 +18,8 @@ cleanup() {
 run_tally_test() {
 
     # Launch tally server in the background
-    ./scripts/start_server.sh profile &
-    # ./scripts/start_server.sh  &
+    # ./scripts/start_server.sh profile &
+    ./scripts/start_server.sh  &
 
     sleep 5
 
@@ -42,9 +42,9 @@ run_tally_test() {
 test_list=(
 #    "python3 ./tests/pytorch_samples/addmm.py"
 #    "python3 ./tests/pytorch_samples/run-imagenet.py"
-    '/home/ymx/llama.cpp/build/bin/llama-simple -m /home/ymx/.cache/llama.cpp/ggml-org_gemma-3-4b-it-GGUF_gemma-3-4b-it-Q4_K_M.gguf -ngl 99 "once upon a time"'
+    '/home/ymx/llama.cpp/build/bin/llama-simple -m /home/ymx/.cache/llama.cpp/ggml-org_gemma-3-27b-it-GGUF_gemma-3-27b-it-Q4_K_M.gguf -ngl 99 "once upon a time"'
 #    '/home/ymx/llama.cpp/build/bin/llama-cli -m /home/ymx/.cache/llama.cpp/ggml-org_tinygemma3-GGUF_tinygemma3-Q8_0.gguf -ngl 99 -no-cnv --prompt "once upon a time" -n 100 '
-    # "./build/tests/test_sync"
+    # "./build/tests/test_sync" 
 #   "./build/tests/elementwise"
 #    "./build/tests/cuda-memcpy-test"	# cuMemAlloc
 #    "./build/tests/test-vmm"

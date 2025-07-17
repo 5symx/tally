@@ -6,6 +6,11 @@ enable_language(CUDA)
 set(SERVER_VERSION "server" CACHE STRING "Server version")
 message(STATUS "SERVER_VERSION is set to: ${SERVER_VERSION}")
 
+if (SERVER_VERSION STREQUAL "server_naive")
+    add_definitions(-DUSE_NAIVE_CLIENT)
+    message(STATUS "client headfile is set to: naive")
+endif()
+
 set(CMAKE_CUDA_COMPILER nvcc)
 set(CMAKE_CXX_STANDARD 20)
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -Wno-deprecated-declarations -Wno-comment -Wno-deprecated -Wno-maybe-uninitialized")
@@ -80,6 +85,8 @@ set(TALLY_SERVER_SRC_FILES
     ${PROJECT_SOURCE_DIR}/src/tally/scheduler/workload_agnostic.cpp
     ${PROJECT_SOURCE_DIR}/src/tally/scheduler/workload_aware.cpp
 )
+
+
 
 set(TALLY_CLIENT_SRC_FILES
     ${PROJECT_SOURCE_DIR}/src/tally/client.cpp
