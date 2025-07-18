@@ -20,6 +20,8 @@
 
 #include "tally/msg_struct.h"
 
+#include <dlfcn.h>
+
 extern cudaError_t LAST_CUDA_ERR;
 extern bool REPLACE_CUBLAS;
 
@@ -29,6 +31,10 @@ public:
 
     static TallyClient *client;
     int32_t client_id;
+
+    //add3
+    int mapped_id;
+    std::string m_id_str = "";
     
     bool has_connected = false;
 
@@ -44,9 +50,72 @@ public:
 
     TallyClient() :
         client_id(getpid())
-    {}
+    {
+        mapped_id = -1;
+    }
 
     ~TallyClient(){}
+
+    
+
+
+    void setM_ID(const std::string& full_file_path) {
+        size_t start_pos = full_file_path.find("ggml-org_gemma-3-");
+
+        if (start_pos == std::string::npos) {
+            std::cerr << "Error: Could not find 'ggml-org_gemma-3-' prefix in path: " << full_file_path << std::endl;
+            m_id_str = "";
+            mapped_id = -1;
+            return;
+        }
+        
+        start_pos += std::string("ggml-org_gemma-3-").length();
+
+
+        size_t end_pos = full_file_path.find("b-it-GGUF_", start_pos);
+        if (end_pos == std::string::npos) {
+            std::cerr << "Error: Could not find 'b-it-GGUF' suffix in path: " << full_file_path << std::endl;
+            m_id_str = "";
+            mapped_id = -1;
+            return;
+        }
+
+        // Extract the substring between "file_" and ".log"
+        m_id_str = full_file_path.substr(start_pos, end_pos - start_pos);
+
+        try {
+            // Attempt to convert the string MID to an integer
+            mapped_id = std::stoi(m_id_str); // ggml-org_gemma-3-1
+        } catch (const std::invalid_argument& e) {
+            std::cerr << "Error: Invalid MID format '" << m_id_str << "'. Not a valid integer. " << e.what() << std::endl;
+            mapped_id = -1; // Indicate error
+        } catch (const std::out_of_range& e) {
+            std::cerr << "Error: MID '" << m_id_str << "' out of integer range. " << e.what() << std::endl;
+            mapped_id = -1; // Indicate error
+        }
+
+        std::cout << "set client model id to: " << mapped_id << std::endl;
+        // exit(1);
+    }
+
+    // void process_args(int argc, char** argv) {
+    //     std::cerr << "TallyClient: Processing arguments from __libc_start_main interception." << std::endl;
+    //     for (int i = 1; i < argc; ++i) {
+    //         std::string arg = argv[i];
+    //         if (arg == "-m") {
+    //             if (i + 1 < argc) {
+    //                 std::string path_mid_arg = argv[++i];
+    //                 this->setM_ID(path_mid_arg);
+    //                 // Perform your parsing logic here (e.g., extractAndSetM_ID)
+    //                 // For simplicity, just store the path for now
+    //                 std::cerr << "TallyClient: Found -m with path: " << path_mid_arg << std::endl;
+    //             }
+    //         }
+    //     }
+    //     std::cout << "TallyClient: set model id " << mapped_id << std::endl;
+    //     exit(1);
+    // }
+
 
     void connect_to_server()
     {
@@ -70,6 +139,7 @@ public:
                     auto request = static_cast<HandshakeMessgae*>(requestPayload);
                     request->header.client_id = client_id;
                     request->client_id = client_id;
+                    request->mapped_id = mapped_id;
                     request->priority = priority;
 
                     client_handshake.send(request).or_else(
@@ -92,7 +162,7 @@ public:
             })) {};
 
             // auto channel_desc_str = std::string("Tally-Communication") + std::to_string(client_id);
-            auto channel_desc_str = std::string("Tally-Main");
+            auto channel_desc_str = std::string("Tally-Main") + std::to_string(mapped_id);
             char channel_desc[100];
             strcpy(channel_desc, channel_desc_str.c_str()); 
             iox_client = new iox::popo::UntypedClient({channel_desc, "tally", "tally"});

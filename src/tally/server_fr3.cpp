@@ -47,35 +47,49 @@ void TallyServer::start_main_server() {
             
             auto msg = static_cast<const HandshakeMessgae*>(requestPayload);
             int32_t client_id = msg->client_id;
+            int32_t mapped_id = msg->mapped_id;
             client_data_all[client_id].client_id = client_id;
+            client_data_all[client_id].mapped_id = mapped_id;
 
             ClientPriority client_priority(client_id, msg->priority);
             client_priority_map[client_priority] = client_id;
             
             
 
-            if(worker_threads.size() == 0)
+            if(mapped_id_init.find(mapped_id) == mapped_id_init.end()) // not found
             {
-                // auto channel_desc_str = std::string("Tally-Communication") + std::to_string(client_id);
-                auto channel_desc_str = std::string("Tally-Main");
+                // auto channel_desc_str = std::string("Tally-Communication") + ;
+                auto channel_desc_str = std::string("Tally-Main") + std::to_string(mapped_id);
                 char channel_desc[100];
                 strcpy(channel_desc, channel_desc_str.c_str()); 
 
-                worker_servers[client_id] = new iox::popo::UntypedServer({channel_desc, "tally", "tally"});
-                std::thread t(&TallyServer::start_worker_server, TallyServer::server, client_id);
-                worker_threads.push_back(std::move(t));
+                worker_servers[mapped_id] = new iox::popo::UntypedServer({channel_desc, "tally", "tally"});
+                // std::thread t(&TallyServer::start_worker_server, TallyServer::server, client_id, mapped_id);
+
+                std::thread t_with_mapped_id([this, client_id, mapped_id] {
+                    this->start_worker_server(client_id, mapped_id);
+                });
+
+                worker_threads.push_back(std::move(t_with_mapped_id));
+
+                mapped_id_init[mapped_id] = true;
             }
             else
             {
-                auto exist_it = threads_running_map.cbegin(); // smallest pid
-                worker_servers[client_id] = worker_servers[exist_it->first];// set to same 
-                std::thread t(&TallyServer::reset_worker_server, TallyServer::server, client_id);
-                worker_threads.push_back(std::move(t));
+                // auto exist_it = threads_running_map.cbegin(); // smallest pid
+                // worker_servers[mapped_id] = worker_servers[exist_it->first];// set to same 
+                // std::thread t(&TallyServer::reset_worker_server, TallyServer::server, client_id, mapped_id);
+
+                std::thread t_with_mapped_id([this, client_id, mapped_id] {
+                    this->reset_worker_server(client_id, mapped_id);
+                });
+
+                worker_threads.push_back(std::move(t_with_mapped_id));
             }
             
             
             
-            threads_running_map[client_id] = true;
+            threads_running_map[mapped_id] = true;
 
             auto requestHeader = iox::popo::RequestHeader::fromPayload(requestPayload);
             handshake_server.loan(requestHeader, sizeof(HandshakeResponse), alignof(HandshakeResponse))
@@ -100,7 +114,7 @@ void TallyServer::start_main_server() {
         //     auto &thread_running = it->second;
 
         //     if (!thread_running) {
-        //         // delete worker_servers[client_id];
+        //         // delete worker_servers[mapped_id];
         //         // worker_servers.erase(client_id);
 
         //         client_data_all[client_id].has_exit = true;
@@ -108,7 +122,7 @@ void TallyServer::start_main_server() {
         //             cudaFree(key.addr);
         //         }
 
-        //         it = threads_running_map.erase(it);
+        //         // it = threads_running_map.erase(it);
         //     } else {
         //         ++it;
         //     }
@@ -166,7 +180,7 @@ void TallyServer::increment_client_queue_size(int32_t client_id)
     client_data_all[client_id].queue_size++;
 }
 
-void TallyServer::start_worker_server(int32_t client_id) {
+void TallyServer::start_worker_server(int32_t client_id, int32_t mapped_id) {
 
     // cudaProfilerStart();
 
@@ -198,7 +212,7 @@ void TallyServer::start_worker_server(int32_t client_id) {
         TALLY_SPD_LOG_ALWAYS("Client priority: " + std::to_string(priority));
     }
 
-    auto worker_server = worker_servers[client_id];
+    auto worker_server = worker_servers[mapped_id]; // same for mapped_id
 
     while (!iox::posix::hasTerminationRequested())
     {
@@ -224,8 +238,9 @@ void TallyServer::start_worker_server(int32_t client_id) {
         }
     }
 
-    threads_running_map[client_id] = false;
-    first_round = false;
+    threads_running_map[mapped_id] = false;
+    // first_round = false;
+    replay_round[mapped_id] = true;
 
 
 
@@ -234,7 +249,7 @@ void TallyServer::start_worker_server(int32_t client_id) {
 
 }
 
-void TallyServer::reset_worker_server(int32_t client_id) {
+void TallyServer::reset_worker_server(int32_t client_id, int32_t mapped_id) {
 
     auto &client_meta = client_data_all[client_id];
 
@@ -243,7 +258,7 @@ void TallyServer::reset_worker_server(int32_t client_id) {
     auto process_name = get_process_name(client_id);
     TALLY_SPD_LOG_ALWAYS("Current Client process: " + process_name);
 
-    auto worker_server = worker_servers[client_id];
+    auto worker_server = worker_servers[mapped_id];
 
     while (!iox::posix::hasTerminationRequested())
     {
@@ -266,7 +281,7 @@ void TallyServer::reset_worker_server(int32_t client_id) {
         }
     }
 
-    threads_running_map[client_id] = false;
+    threads_running_map[mapped_id] = false;
     TALLY_SPD_LOG_ALWAYS("Tally worker server has exited ...");
 
 }
@@ -979,10 +994,10 @@ void TallyServer::handle___cudaRegisterFatBinaryEnd(void *__args, iox::popo::Unt
     }
 }
 
-void TallyServer::handle_cuda_allocation(cudaMallocResponse* response, cudaMallocArg* args,
+void TallyServer::handle_cuda_allocation_with_mid(cudaMallocResponse* response, cudaMallocArg* args,
                             std::vector<mem_region>& dev_addr_map,
                             std::vector<mem_region>& client_dev_addr_map,
-                            int32_t& current_id_counter,
+                            int32_t mapped_id,
                             bool reuse_flag = false)
 {
     response->err = cudaMalloc(&(response->devPtr), args->size);
@@ -990,12 +1005,11 @@ void TallyServer::handle_cuda_allocation(cudaMallocResponse* response, cudaMallo
     if (response->err == cudaSuccess) {
         if (reuse_flag) // global
         {
-            dev_addr_map.push_back(mem_region(response->devPtr, args->size, true , current_id_counter + 1));
-            current_id_counter++;
-            TALLY_SPD_WARN("Allocated new memory. Current ID counter: {}" + std::to_string(current_id_counter)); // Use spdlog's direct formatting
+            dev_addr_map.push_back(mem_region(response->devPtr, args->size, true , mapped_id));
+            TALLY_SPD_WARN("Allocated new memory. Current ID counter: {}" + std::to_string(mapped_id)); // Use spdlog's direct formatting
             
         }
-        else
+        else // client local
         {
             client_dev_addr_map.push_back(mem_region(response->devPtr, args->size));
             TALLY_SPD_WARN("Allocated new memory without Current ID counter within client_dev"); // Use spdlog's direct formatting
@@ -1022,24 +1036,24 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
         .and_then([&](auto& responsePayload) {
 
             auto response = static_cast<cudaMallocResponse*>(responsePayload);
-            if(first_round)
+            if(!replay_round[client_data_all[client_id].mapped_id]) // first round
             {
                 if(!finish_init) // before first kernel launch
                 {
-                    handle_cuda_allocation(response, args, dev_addr_map, client_data_all[client_id].dev_addr_map, init_mem_Size, true);
+                    handle_cuda_allocation_with_mid(response, args, dev_addr_map, client_data_all[client_id].dev_addr_map, client_data_all[client_id].mapped_id, true);
                     finish_init = true; // only first cudamalloc is for reuse  model
                 }
                 else
                 {
-                    handle_cuda_allocation(response, args, dev_addr_map, client_data_all[client_id].dev_addr_map, init_mem_Size, false);
+                    handle_cuda_allocation_with_mid(response, args, dev_addr_map, client_data_all[client_id].dev_addr_map, -1, false);
                 }
             }
             else // reuse exist cudaMalloc content - init for memory
             {
-                if(client_data_all[client_id].rc_mem_Size == 0)
+                if(client_data_all[client_id].rc_mem == false)
                 {
                     // TALLY_SPD_WARN("current rc memory id " + std::to_string(client_data_all[client_id].rc_mem_Size));
-                    response->devPtr = get_addr_by_init_memory_id(dev_addr_map, client_data_all[client_id].rc_mem_Size + 1);
+                    response->devPtr = get_addr_by_init_memory_id(dev_addr_map, client_data_all[client_id].mapped_id);
                     if (response->devPtr != nullptr)
                     {
                         // if(client_data_all[client_id].rc_mem_Size > 0)
@@ -1050,8 +1064,8 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
                         // else // init first model malloc only
                         // {
                             response->err = cudaSuccess;
-                            client_data_all[client_id].rc_mem_Size++;
-                            TALLY_SPD_WARN("recovery current mr size " + std::to_string(client_data_all[client_id].rc_mem_Size));
+                            client_data_all[client_id].rc_mem = true;
+                            TALLY_SPD_WARN("recovery current mr size " + std::to_string(client_data_all[client_id].mapped_id));
                         // }
                         
                     }
@@ -1067,7 +1081,7 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
                 {
                     if(client_data_all[client_id].first_init == false)
                         client_data_all[client_id].first_init = true;
-                    handle_cuda_allocation(response, args, dev_addr_map, client_data_all[client_id].dev_addr_map, init_mem_Size, false);
+                    handle_cuda_allocation_with_mid(response, args, dev_addr_map, client_data_all[client_id].dev_addr_map, -1, false);
                 }
             }
 
@@ -1199,7 +1213,7 @@ void TallyServer::handle_cudaMemcpyAsync(void *__args, iox::popo::UntypedServer 
 
             if (args->kind == cudaMemcpyHostToDevice) {
 
-                if(!first_round && !client_data_all[client_id].first_init)
+                if(replay_round[client_data_all[client_id].mapped_id] && !client_data_all[client_id].first_init)
                 {
                     TALLY_SPD_LOG("Bypass cudaMemcpyAsync");
                     res->err = cudaSuccess;
@@ -3120,7 +3134,7 @@ void TallyServer::handle_cudaStreamSynchronize(void *__args, iox::popo::UntypedS
 
             auto response = static_cast<cudaError_t*>(responsePayload);
 
-            if(!first_round && !client_data_all[client_id].first_init)
+            if(replay_round[client_data_all[client_id].mapped_id] && !client_data_all[client_id].first_init)
             {
                 TALLY_SPD_LOG("Bypass cudaStreamSynchronize");
                 *response = cudaSuccess;
@@ -3643,7 +3657,7 @@ void TallyServer::handle_cudaMemset(void *__args, iox::popo::UntypedServer *iox_
 
             auto response = static_cast<cudaError_t*>(responsePayload);		
 
-            if(!first_round && !client_data_all[client_id].first_init)
+            if(replay_round[client_data_all[client_id].mapped_id] && !client_data_all[client_id].first_init)
             {
                 TALLY_SPD_LOG("Bypass cudaMemsetAsync");
                 *response = cudaSuccess;
@@ -5221,23 +5235,23 @@ void TallyServer::handle_cudaMemsetAsync(void *__args, iox::popo::UntypedServer 
 	auto requestHeader = iox::popo::RequestHeader::fromPayload(requestPayload);
 
     auto msg_header = static_cast<const MessageHeader_t*>(requestPayload);
-    int32_t client_uid = msg_header->client_id;
+    int32_t client_id = msg_header->client_id;
 
     cudaStream_t __stream = args->stream;
 
     // If client submits to default stream, set to a re-assigned stream
     if (__stream == nullptr) {
-        __stream = client_data_all[client_uid].default_stream;
+        __stream = client_data_all[client_id].default_stream;
     }
 
     iox_server->loan(requestHeader, sizeof(cudaError_t), alignof(cudaError_t))
         .and_then([&](auto& responsePayload) {
 
-            wait_until_launch_queue_empty(client_uid);
+            wait_until_launch_queue_empty(client_id);
 
             auto response = static_cast<cudaError_t*>(responsePayload);
 
-            if(!first_round && !client_data_all[client_uid].first_init)
+            if(replay_round[client_data_all[client_id].mapped_id] && !client_data_all[client_id].first_init)
             {
                 TALLY_SPD_LOG("Bypass cudaMemsetAsync");
                 *response = cudaSuccess;

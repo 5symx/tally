@@ -44,7 +44,7 @@ struct mem_region {
         addr(_addr),
         size(_size),
         reuse_init_memory(false), // Default to false if not provided
-        init_memory_id(0)         // Default to 0 or some invalid ID
+        init_memory_id(-1)         // Default to 0 or some invalid ID
     {}
 
     // Or a constructor that takes all of them

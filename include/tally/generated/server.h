@@ -74,12 +74,15 @@ public:
 	cudaGraphExec_t graphExec = nullptr;
 
 	std::atomic<bool> finish_first = false;
+	std::atomic<bool> first_round = true;
 	// std::atomic<bool> finish_first_global(false);
 	bool replay_graph = false;
 	cudaStream_t replay_stream = nullptr;
 
 	//add
 	int32_t rc_mem_Size = 0;
+	std::atomic<bool> rc_mem = false;
+	int32_t mapped_id;
 
 	uint32_t *curr_idx_arr;
 
@@ -122,8 +125,10 @@ public:
 
 	//add 
 	std::atomic<bool> finish_init = false;
-	std::atomic<bool> first_round = true;
+	std::map<int32_t, std::atomic<bool>> replay_round;
+	// std::atomic<bool> first_round = true;
 	std::vector<mem_region> dev_addr_map;
+
 	int32_t rc_mem_Size = 0;
 	int32_t init_mem_Size = 0;
 
@@ -136,6 +141,8 @@ public:
 
     std::map<int32_t, iox::popo::UntypedServer *> worker_servers;
 	std::map<int32_t, std::atomic<bool>> threads_running_map;
+
+	std::map<int32_t, std::atomic<bool>> mapped_id_init;
     
 	// ==================== Global state =====================
 	std::unordered_map<CUDA_API_ENUM, std::function<void(void *, iox::popo::UntypedServer *, const void* const)>> cuda_api_handler_map;
@@ -184,6 +191,12 @@ public:
                             std::vector<mem_region>& dev_addr_map,
 							std::vector<mem_region>& client_dev_addr_map,
                             int32_t& current_id_counter,
+                            bool reuse_flag);
+
+	void handle_cuda_allocation_with_mid(cudaMallocResponse* response, cudaMallocArg* args,
+                            std::vector<mem_region>& dev_addr_map,
+							std::vector<mem_region>& client_dev_addr_map,
+                            int32_t mapped_id,
                             bool reuse_flag);
 
 	int32_t get_client_priority(int32_t client_id);
@@ -241,10 +254,13 @@ public:
 
     void start_scheduler();
     void start_main_server();
-    void start_worker_server(int32_t client_id);
+	void start_worker_server(int32_t client_id);
+
 
 	//add
 	void reset_worker_server(int32_t client_id);
+	void start_worker_server(int32_t client_id, int32_t mapped_id);
+	void reset_worker_server(int32_t client_id, int32_t mapped_id);
 
 	void increment_client_queue_size(int32_t client_id);
 	void wait_until_launch_queue_empty(int32_t client_id);

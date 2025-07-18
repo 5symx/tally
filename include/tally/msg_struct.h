@@ -50,6 +50,7 @@ typedef struct MessageHeaderID {
 struct HandshakeMessgae {
     MessageHeaderID_t header;
     int32_t client_id;
+    int32_t mapped_id;
     int32_t priority;
 };
 

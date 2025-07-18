@@ -34,7 +34,17 @@ run_tally_test() {
 
     sleep 3
 
-    ./scripts/start_client.sh "$@"
+    ./scripts/start_client.sh '/home/ymx/llama.cpp/build/bin/llama-simple -m /home/ymx/.cache/llama.cpp/ggml-org_gemma-3-4b-it-GGUF_gemma-3-4b-it-Q4_K_M.gguf -ngl 99 "once upon a time"'
+
+    sleep 3
+
+    ./scripts/start_client.sh "$@" #./build/tests/elementwise
+
+    sleep 3
+
+    ./scripts/start_client.sh '/home/ymx/llama.cpp/build/bin/llama-simple -m /home/ymx/.cache/llama.cpp/ggml-org_gemma-3-4b-it-GGUF_gemma-3-4b-it-Q4_K_M.gguf -ngl 99 "once upon a time"'
+
+    sleep 3
 
     ./scripts/kill_server.sh
 } 
@@ -42,7 +52,7 @@ run_tally_test() {
 test_list=(
 #    "python3 ./tests/pytorch_samples/addmm.py"
 #    "python3 ./tests/pytorch_samples/run-imagenet.py"
-    '/home/ymx/llama.cpp/build/bin/llama-simple -m /home/ymx/.cache/llama.cpp/ggml-org_gemma-3-27b-it-GGUF_gemma-3-27b-it-Q4_K_M.gguf -ngl 99 "once upon a time"'
+    '/home/ymx/llama.cpp/build/bin/llama-simple -m /home/ymx/.cache/llama.cpp/ggml-org_gemma-3-1b-it-GGUF_gemma-3-1b-it-Q4_K_M.gguf -ngl 99 "once upon a time"'
 #    '/home/ymx/llama.cpp/build/bin/llama-cli -m /home/ymx/.cache/llama.cpp/ggml-org_tinygemma3-GGUF_tinygemma3-Q8_0.gguf -ngl 99 -no-cnv --prompt "once upon a time" -n 100 '
     # "./build/tests/test_sync" 
 #   "./build/tests/elementwise"
