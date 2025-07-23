@@ -30,21 +30,26 @@ run_tally_test() {
     fi
 
     # Launch client process
-    ./scripts/start_client.sh "$@" #./build/tests/elementwise
 
+    python3 ./scripts/SC-client.py
+    
     sleep 3
 
-    ./scripts/start_client.sh '/home/ymx/llama.cpp/build/bin/llama-simple -m /home/ymx/.cache/llama.cpp/ggml-org_gemma-3-4b-it-GGUF_gemma-3-4b-it-Q4_K_M.gguf -ngl 99 "once upon a time"'
+    # ./scripts/start_client.sh "$@" #./build/tests/elementwise
 
-    sleep 3
+    # # sleep 3
 
-    ./scripts/start_client.sh "$@" #./build/tests/elementwise
+    # ./scripts/start_client.sh '/home/ymx/llama.cpp/build/bin/llama-simple -m /home/ymx/.cache/llama.cpp/ggml-org_gemma-3-4b-it-GGUF_gemma-3-4b-it-Q4_K_M.gguf -ngl 99 "once upon a time"'
 
-    sleep 3
+    # # sleep 3
 
-    ./scripts/start_client.sh '/home/ymx/llama.cpp/build/bin/llama-simple -m /home/ymx/.cache/llama.cpp/ggml-org_gemma-3-4b-it-GGUF_gemma-3-4b-it-Q4_K_M.gguf -ngl 99 "once upon a time"'
+    # ./scripts/start_client.sh "$@" #./build/tests/elementwise
 
-    sleep 3
+    # # sleep 3
+
+    # ./scripts/start_client.sh '/home/ymx/llama.cpp/build/bin/llama-simple -m /home/ymx/.cache/llama.cpp/ggml-org_gemma-3-4b-it-GGUF_gemma-3-4b-it-Q4_K_M.gguf -ngl 99 "once upon a time"'
+
+    # sleep 3
 
     ./scripts/kill_server.sh
 } 

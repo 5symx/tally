@@ -55,6 +55,8 @@ docs/_build/
 .tally_cache_client
 .tally_perf_cache
 data/
+trace/*.csv
+trace/*.txt
 
 Makefile.bak
 cudnn/

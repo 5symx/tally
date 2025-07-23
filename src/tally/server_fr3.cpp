@@ -1038,10 +1038,10 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
             auto response = static_cast<cudaMallocResponse*>(responsePayload);
             if(!replay_round[client_data_all[client_id].mapped_id]) // first round
             {
-                if(!finish_init) // before first kernel launch
+                if(!finish_init[client_data_all[client_id].mapped_id]) // before first kernel launch
                 {
                     handle_cuda_allocation_with_mid(response, args, dev_addr_map, client_data_all[client_id].dev_addr_map, client_data_all[client_id].mapped_id, true);
-                    finish_init = true; // only first cudamalloc is for reuse  model
+                    finish_init[client_data_all[client_id].mapped_id] = true; // only first cudamalloc is for reuse model
                 }
                 else
                 {
@@ -1050,7 +1050,7 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
             }
             else // reuse exist cudaMalloc content - init for memory
             {
-                if(client_data_all[client_id].rc_mem == false)
+                if(client_data_all[client_id].rc_mem == false && client_data_all[client_id].mapped_id != -1)
                 {
                     // TALLY_SPD_WARN("current rc memory id " + std::to_string(client_data_all[client_id].rc_mem_Size));
                     response->devPtr = get_addr_by_init_memory_id(dev_addr_map, client_data_all[client_id].mapped_id);
@@ -1067,11 +1067,9 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
                             client_data_all[client_id].rc_mem = true;
                             TALLY_SPD_WARN("recovery current mr size " + std::to_string(client_data_all[client_id].mapped_id));
                         // }
-                        
                     }
                     else
                     {
-                        
                         response->err = cudaErrorMemoryAllocation;
                         response->devPtr = nullptr;
                         TALLY_SPD_WARN("Encountered cudaErrorMemoryAllocation " + std::string(__FILE__) + ":" + std::to_string(__LINE__));

@@ -124,7 +124,7 @@ public:
 	std::atomic<bool> is_profile = false;
 
 	//add 
-	std::atomic<bool> finish_init = false;
+	std::map<int32_t, std::atomic<bool>> finish_init;
 	std::map<int32_t, std::atomic<bool>> replay_round;
 	// std::atomic<bool> first_round = true;
 	std::vector<mem_region> dev_addr_map;
