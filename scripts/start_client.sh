@@ -25,4 +25,7 @@ if [ -e "$TALLY_CACHE_PATH" ]; then
     fi
 fi
 
+# OVERRIDE_PATH=${TALLY_HOME%%/}/build/liboverride.so
+
+# LD_PRELOAD=$TALLY_CLIENT_LIB_PATH:$OVERRIDE_PATH $@
 LD_PRELOAD=$TALLY_CLIENT_LIB_PATH $@

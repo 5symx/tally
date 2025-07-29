@@ -33,6 +33,10 @@ size = 4194304
 count = 10
 
 [[segment.mempool]]
+size = 536870912
+count = 5
+
+[[segment.mempool]]
 size = 1073741824
 count = 2
 

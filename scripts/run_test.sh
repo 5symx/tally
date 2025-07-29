@@ -54,6 +54,18 @@ run_tally_test() {
     ./scripts/kill_server.sh
 } 
 
+
+run_naive_test() {
+
+    sleep 5
+
+    # Launch client process
+
+    python3 ./scripts/SC-client.py
+    
+    sleep 3
+} 
+
 test_list=(
 #    "python3 ./tests/pytorch_samples/addmm.py"
 #    "python3 ./tests/pytorch_samples/run-imagenet.py"
@@ -101,8 +113,16 @@ sleep 5
 sleep 5
 
 # Run tests with tally-server-client
-for item in "${test_list[@]}"; do
-    run_tally_test "$item"
+# for item in "${test_list[@]}"; do
+#     run_tally_test "$item"
+# done
+
+# for i in {0..10}; do
+#     run_tally_test 
+# done
+
+for i in {0..10}; do
+    run_naive_test 
 done
 
 # Run tests again with REPLACE_CUBLAS set

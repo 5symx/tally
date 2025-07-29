@@ -209,6 +209,42 @@ target_link_libraries(tally_server PUBLIC
     readerwriterqueue
 )
 
+# Add an option to enable/disable this special build. It's off by default.
+option(ENABLE_LLAMA_OVERRIDE "Enable building the llama_model_load_from_file override library" ON)
+
+# Only proceed with this section if the user has enabled the option.
+if(ENABLE_LLAMA_OVERRIDE)
+    message(STATUS "Llama override library build is ENABLED.")
+
+    # Define a variable for the path to the llama.cpp source directory.
+    set(LLAMA_CPP_DIR "" CACHE PATH "Path to the root of the llama.cpp source directory")
+
+    # Ensure the user has provided the path.
+    if(NOT LLAMA_CPP_DIR OR NOT EXISTS "${LLAMA_CPP_DIR}/include/llama.h")
+        message(FATAL_ERROR "When ENABLE_LLAMA_OVERRIDE is ON, you must set LLAMA_CPP_DIR to a valid llama.cpp source directory.")
+    endif()
+    message(STATUS "Override using llama.cpp source from: ${LLAMA_CPP_DIR}")
+
+    # Define our new shared library target from its source file.
+    # Make sure the path to override.cpp is correct.
+    add_library(llama_override SHARED ${PROJECT_SOURCE_DIR}/preload/override.cpp)
+
+    # Set properties for the library.
+    set_target_properties(llama_override PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        OUTPUT_NAME "override" # Creates override.so instead of libllama_override.so
+    )
+
+    # Add the llama.cpp directory to the include path for this target only.
+    target_include_directories(llama_override PRIVATE ${LLAMA_CPP_DIR}/include ${LLAMA_CPP_DIR}/ggml/include)
+
+
+    target_link_libraries(llama_override PUBLIC dl)
+
+    message(STATUS "The override library will be built as: ${PROJECT_SOURCE_DIR}/build/liboverride.so (or similar)")
+
+endif()
+
 add_subdirectory(scripts)
 add_subdirectory(tests)
 add_subdirectory(third_party/cudnn-frontend)

@@ -3,6 +3,8 @@
 #include <cassert>
 #include <unordered_set>
 #include <atomic>
+#include <mutex>
+#include <condition_variable>
 
 #include <tally/transform.h>
 #include <tally/util.h>
@@ -38,7 +40,10 @@ void TallyServer::start_main_server() {
 
     TALLY_SPD_LOG_ALWAYS("Tally server is up ...");
 
-    std::vector<std::thread> worker_threads;
+    // std::vector<std::thread> worker_threads;
+    std::vector<ThreadInfo> worker_threads;
+    
+
 
     while (!iox::posix::hasTerminationRequested())
     {
@@ -70,12 +75,25 @@ void TallyServer::start_main_server() {
                     this->start_worker_server(client_id, mapped_id);
                 });
 
-                worker_threads.push_back(std::move(t_with_mapped_id));
+                // worker_threads.push_back(std::move(t_with_mapped_id));
+                worker_threads.push_back({mapped_id, std::move(t_with_mapped_id)});
 
                 mapped_id_init[mapped_id] = true;
             }
             else
             {
+                for (auto& info : worker_threads) {
+                    // Check if the current element's ID matches
+                    if (info.mapped_id == mapped_id) {
+                        std::cout << "Found match: Joining thread with native ID " << info.worker.get_id() << std::endl;
+                        if (info.worker.joinable()) {
+                            info.worker.join(); // Join the thread
+                        }
+                    }
+                }
+
+                // execute but wait until model init finish
+
                 // auto exist_it = threads_running_map.cbegin(); // smallest pid
                 // worker_servers[mapped_id] = worker_servers[exist_it->first];// set to same 
                 // std::thread t(&TallyServer::reset_worker_server, TallyServer::server, client_id, mapped_id);
@@ -84,7 +102,8 @@ void TallyServer::start_main_server() {
                     this->reset_worker_server(client_id, mapped_id);
                 });
 
-                worker_threads.push_back(std::move(t_with_mapped_id));
+                // worker_threads.push_back(std::move(t_with_mapped_id));
+                worker_threads.push_back({mapped_id, std::move(t_with_mapped_id)});
             }
             
             
@@ -133,8 +152,14 @@ void TallyServer::start_main_server() {
         cudaFree(key.addr);
     }
 
-    for (auto &t : worker_threads) {
-        t.join();
+    // for (auto &t : worker_threads) {
+    //     t.join();
+    // }
+
+    for(auto& info : worker_threads){
+        if(info.worker.joinable()){
+            info.worker.join();
+        }
     }
 
     cudaProfilerStop();
@@ -249,7 +274,7 @@ void TallyServer::start_worker_server(int32_t client_id, int32_t mapped_id) {
 
 }
 
-void TallyServer::reset_worker_server(int32_t client_id, int32_t mapped_id) {
+void TallyServer::reset_worker_server(int32_t client_id, int32_t mapped_id_reset) {
 
     auto &client_meta = client_data_all[client_id];
 
@@ -258,7 +283,28 @@ void TallyServer::reset_worker_server(int32_t client_id, int32_t mapped_id) {
     auto process_name = get_process_name(client_id);
     TALLY_SPD_LOG_ALWAYS("Current Client process: " + process_name);
 
-    auto worker_server = worker_servers[mapped_id];
+    auto worker_server = worker_servers[mapped_id_reset];
+
+    // //worker_threads to get index for lock
+    // for (size_t i = 0; i < worker_threads.size(); ++i) {
+
+    //     // Check if the current element's ID matches
+    //     if (worker_threads[i].mapped_id == mapped_id_reset) {
+            
+    //         // // --- How to print the index ---
+    //         // std::cout << "Found a match for mapped_id " << mapped_id_to_find 
+    //         //           << " at index: " << i << std::endl;
+
+    //         //after first model init 
+    //         std::unique_lock<std::mutex> lock(mtx[i]);
+    //         cv[i].wait(lock, [this, i] { return this->data_ready[i]; });
+            
+    //         // You can now access the element directly using the index
+    //         // For example: if (worker_threads[i].worker.joinable()) { ... }
+    //     }
+    // }
+
+    
 
     while (!iox::posix::hasTerminationRequested())
     {
@@ -281,7 +327,7 @@ void TallyServer::reset_worker_server(int32_t client_id, int32_t mapped_id) {
         }
     }
 
-    threads_running_map[mapped_id] = false;
+    threads_running_map[mapped_id_reset] = false;
     TALLY_SPD_LOG_ALWAYS("Tally worker server has exited ...");
 
 }
@@ -1046,6 +1092,29 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
                 else
                 {
                     handle_cuda_allocation_with_mid(response, args, dev_addr_map, client_data_all[client_id].dev_addr_map, -1, false);
+
+                    // for (size_t i = 0; i < worker_threads.size(); ++i) {
+
+                    //     // Check if the current element's ID matches
+                    //     if (worker_threads[i].mapped_id == client_data_all[client_id].mapped_id) {
+                            
+                    //         // // --- How to print the index ---
+                    //         // std::cout << "Found a match for mapped_id " << mapped_id_to_find 
+                    //         //           << " at index: " << i << std::endl;
+
+                    //         // //after model init
+                    //         // {
+                    //         //     std::lock_guard<std::mutex> lock(mtx[i]);
+                    //         //     std::cout << "Writer: Writing data..." << std::endl;
+                    //         //     this->data_ready[i] = true;
+                    //         //     cv[i].notify_all();
+                    //         // } // Lock released
+                            
+                            
+                    //     }
+                    // }
+
+                    
                 }
             }
             else // reuse exist cudaMalloc content - init for memory

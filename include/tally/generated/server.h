@@ -109,11 +109,27 @@ struct ClientPriority {
 
 };
 
+
+struct ThreadInfo {
+    int mapped_id;
+    std::thread worker;
+    // You could add other metadata here too
+};
+
+
 class TallyServer {
 
 public:
 
     static TallyServer *server;
+
+	size_t num_lock = 10;
+
+	// std::vector<std::mutex> mtx{num_lock}; // set model count
+    // std::vector<std::condition_variable> cv{num_lock};
+	// std::vector<bool> data_ready{std::vector<bool>(num_lock, false)};
+
+	// std::vector<ThreadInfo> worker_threads;
 
 	bool signal_exit = false;
 
