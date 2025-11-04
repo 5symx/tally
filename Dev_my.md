@@ -31,3 +31,28 @@ TODO:
 1.enable safe free memory
 2.small chunk need to be allocate at 2MB because of granuraity
 3.need to add a flag to set is it allocate as shared or not. send it with args-> tag
+
+## re-build tally
+```sh
+./run_docker.sh my-tally-bench:v1
+
+make SERVER_VERSION=server_fr3
+
+sudo ./scripts/run_all_tests_naive.sh 15
+sudo ./scripts/run_test.sh server_fr3 2>&1 | tee output-1026.log
+
+find /usr -name "libnvidia-ml.so*" 2>/dev/null
+sudo ln -s /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1 /usr/lib/x86_64-linux-gnu/libnvidia-ml.so
+
+export TALLY_HOME=/home/ymx
+
+find /usr/local/cuda*/bin -name cuobjdump
+export PATH=$PATH:/usr/local/cuda/bin
+
+```
+
+## takeaway
+switching client:
+tally_client / tally_client_local - modify SC-Client.py args = shlex.split(command)
+Latest server:
+server_fr3 

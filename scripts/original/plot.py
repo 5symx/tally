@@ -138,7 +138,7 @@ bars_tmm = ax.bar(x + width/2, tmm_norm, width, label='TMM', color='#ff7f0e')
 # Primary axis labels
 ax.set_xlabel('Model Size', fontsize=12)
 ax.set_ylabel('Normalized Latency for Workload Switching', fontsize=12)
-ax.set_title('Switching Latency Comparison with Speed-Up Overlay', fontsize=14)
+# ax.set_title('Switching Latency Comparison with Speed-Up Overlay', fontsize=14)
 ax.set_xticks(x)
 ax.set_xticklabels(models)
 ax.grid(axis='y', linestyle='--', alpha=0.6)
@@ -154,7 +154,7 @@ for i in range(len(x)):
     ax2.text(x[i], speedup[i]+3, f'{speedup[i]:.2f}%', ha='center', va='bottom', fontsize=10, color='#333333')
 
 # Legends
-ax.legend(loc='upper left', fontsize=10)
+# ax.legend(loc='upper left', fontsize=10)
 
 # Layout for publication
 plt.tight_layout()

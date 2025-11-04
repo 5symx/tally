@@ -55,8 +55,10 @@ std::pair<partial_t, void *> TallyServer::cudaLaunchKernel_Partial(const void *f
         CUresult err;
 
         if (repeat) {
+            // std::cout << "repeat launch" << std::endl;
             err = config.repeat_launch(func, gridDim, blockDim, (void **) __args_arr, sharedMem, stream, dur_seconds, ptb_args, curr_idx_arr, slice_args, time_ms, iters, total_iters);
         } else {
+            // std::cout << "non-repeat launch" << std::endl;
             err = config.launch(func, gridDim, blockDim, (void **) __args_arr, sharedMem, stream, ptb_args, curr_idx_arr, slice_args);
         }
 

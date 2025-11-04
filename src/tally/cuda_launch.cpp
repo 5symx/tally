@@ -322,7 +322,7 @@ CUresult CudaLaunchConfig::launch(
     }
 
     if (use_original) {
-
+        // std::cout <<"use original  " << std::endl;
         err = lcuLaunchKernel(cu_func, gridDim.x, gridDim.y, gridDim.z,
                                 blockDim.x, blockDim.y, blockDim.z, sharedMem, stream, args, NULL);
         

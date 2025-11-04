@@ -36,15 +36,15 @@ def extract_split_log_entries(log_file_path):
 
     return results
 
-# Example usage
-log_path = "./txt-naive-12b.log"
+# Example usagell
+log_path = "./naive-con6-1b.log" #"./txt-naive-1b.log" # ./txt-naive-1b.log
 entries = extract_split_log_entries(log_path)
 
 # for entry in entries:
 #     print(entry)
 
-group1 = []
-group2 = []
+# group1 = []
+group0 = []
 
 ### naive
 
@@ -58,12 +58,12 @@ for idx, entry in enumerate(entries):
         continue
 
     try:
-        init_time = float(entry.get('init_time', 0))
+        speed = float(entry.get('speed', 0))
     except (ValueError, TypeError):
         continue
     
-    group2.append(init_time)
-    if len(group2) == 10:
+    group0.append(speed)
+    if len(group0) == 30:
         break
 
     # if not group1:
@@ -84,7 +84,7 @@ def summarize(group, name):
 
 # Results
 # mean1 = summarize(group1, "Group 1")
-mean2 = summarize(group2, "Group 2")
+mean_naive = summarize(group0, "Group 0")
 
 # Calculate percentage increase
 # increase_percent = ((mean1 - mean2) / mean1) * 100
@@ -99,9 +99,66 @@ mean2 = summarize(group2, "Group 2")
 #### TMM
 print()
 
+# Example usagell
+log_path = "./mps-con6-1b.log" #"./txt-mps-1b.log" # ./txt-naive-1b.log
+entries = extract_split_log_entries(log_path)
+
+# for entry in entries:
+#     print(entry)
+
+# group1 = []
+group_mps = []
+
+### naive
+
+
+prev_empty = False
+for idx, entry in enumerate(entries):
+    # print(entry)
+
+    if entry == {}:
+        prev_empty = True
+        continue
+
+    try:
+        speed = float(entry.get('speed', 0))
+    except (ValueError, TypeError):
+        continue
+    
+    group_mps.append(speed)
+    if len(group_mps) == 30:
+        break
+
+    # if not group1:
+    #     group1.append(init_time)
+    # elif prev_empty:
+    #     group1.append(init_time)
+    #     prev_empty = False
+    # else:
+    #     group2.append(init_time)
+
+# Statistics helper
+def summarize(group, name):
+    mean = round(statistics.mean(group), 3)
+    stdev = round(statistics.stdev(group), 3) if len(group) > 1 else 0
+    print(f"{name}: Count={len(group)}, Avg={mean}s, Std Dev={stdev}s")
+    # print(f"{name}: Count={len(group)}, Avg={mean}t/s, Std Dev={stdev}t/s")
+    return mean
+
+# Results
+# mean1 = summarize(group1, "Group 1")
+mean_mps = summarize(group_mps, "Group mps")
+
+# Calculate percentage increase
+increase_percent = ((mean_naive - mean_mps) / mean_naive) * 100
+
+# Print result rounded to two decimals
+print(f"Group naive's speed is {increase_percent:.2f}% higher than Group mps's.")
+
+
 
 # Example usage
-log_path = "./txt-fr3-12b.log"
+log_path = "./gm-con6-1b.log"#"./txt-fr3-1b.log"
 entries = extract_split_log_entries(log_path)
 
 # for entry in entries:
@@ -119,19 +176,19 @@ for idx, entry in enumerate(entries):
         continue
 
     try:
-        init_time = float(entry.get('init_time', 0))
+        speed = float(entry.get('speed', 0))
     except (ValueError, TypeError):
         continue
 
     
 
     if not group1:
-        group1.append(init_time)
+        group1.append(speed)
     elif prev_empty:
-        group1.append(init_time)
+        group1.append(speed)
         prev_empty = False
     else:
-        group2.append(init_time)
+        group2.append(speed)
     if len(group1) == 50:
         break
 
@@ -149,11 +206,18 @@ mean2 = summarize(group2, "Group 2")
 
 
 # Calculate percentage increase
-increase_percent = ((mean1 - mean2) / mean1) * 100
+increase_percent = ((mean_naive - mean2) / mean_naive) * 100
 
 # Print result rounded to two decimals
-print(f"Group 1's init_time is {increase_percent:.2f}% higher than Group 2's.")
+print(f"Group naive's speed is {increase_percent:.2f}% higher than Group 2's.")
 
 # increase_percent = ((mean2 - mean1) / mean1) * 100
 
 # print(f"Group 1's speed is {increase_percent:.2f}% higher than Group 2's.")
+
+
+# Calculate percentage increase
+increase_percent = ((mean_mps - mean2) / mean_mps) * 100
+
+# Print result rounded to two decimals
+print(f"Group mps's speed is {increase_percent:.2f}% higher than Group 2's.")

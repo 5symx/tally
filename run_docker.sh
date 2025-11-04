@@ -19,7 +19,7 @@ fi
 
 DEBUG_FLAGS="--cap-add=SYS_PTRACE --security-opt seccomp=unconfined"
 DOCKER_MAP="-v /home/ymx/tally-bench:/home/ymx/tally-bench -v /home/ymx/llama.cpp:/home/ymx/llama.cpp -v $PWD:$PWD -w $PWD -v /etc/passwd:/etc/passwd -v /etc/group:/etc/group -v \
-  $ROOT_DIR:/source -v /home/ymx/.cache:/home/ymx/.cache -v /home/ymx/tally/config/roudi_config.toml:/etc/iceoryx/roudi_config.toml \
+  $ROOT_DIR:/source -v /home/ymx/.cache:/home/ymx/.cache -v /data0/ymx/cache/:/data0/ymx/cache -v /home/ymx/tally/config/roudi_config.toml:/etc/iceoryx/roudi_config.toml \
   -v /home/ymx/my_tmp:/home/ymx/my_tmp"
 
 DOCKER_FLAGS="--rm ${DOCKER_MAP}  -e TALLY_HOME=/home/ymx/tally -e HOME=/home/ymx --network=host --user root --ipc=host --security-opt seccomp=unconfined ${DEBUG_FLAGS}"
