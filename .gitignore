@@ -71,3 +71,5 @@ build_bak/*
 figure/*
 result_data/*
 start_mps.sh
+my_tmp/*
+cudnn/*

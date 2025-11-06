@@ -3,9 +3,12 @@ SERVER_VERSION=$1
 MODEL_SIZE=$2
 CONV_NUM=$3
 
+# LLAMA_CPP_DIR=/home/llama.cpp
+
 export CUDA_VISIBLE_DEVICES="0"
-export TALLY_HOME=/home/ymx/tally
+export TALLY_HOME=/home/tally
 export PATH=$PATH:/usr/local/cuda/bin
+export XDG_CACHE_HOME=/home/.cache
 
 if [ -z "$SERVER_VERSION" ]; then
     echo "Error: SERVER_VERSION is not set!"
@@ -35,13 +38,13 @@ run_tally_test() {
 
     # Launch client process
 
-    python3 ./scripts/SC-client.py
+    # python3 ./scripts/SC-client.py
     
-    sleep 3
-
-    # ./scripts/start_client.sh './build/tests/elementwise' # check
-
     # sleep 3
+
+    ./scripts/start_client.sh './build/tests/elementwise' # check
+
+    sleep 3
 
     # ./scripts/start_client.sh '/home/ymx/llama.cpp/build/bin/llama-simple -m /home/ymx/.cache/llama.cpp/ggml-org_gemma-3-4b-it-GGUF_gemma-3-4b-it-Q4_K_M.gguf -ngl 99 "once upon a time"'
 
@@ -124,13 +127,13 @@ sleep 5
 #     run_tally_test "$item"
 # done
 
-# for i in {0..30}; do # 10
-#     run_tally_test 
-# done
-
-for i in {0..30}; do
-    run_naive_test 
+for i in {0..1}; do # 10
+    run_tally_test 
 done
+
+# for i in {0..30}; do
+#     run_naive_test 
+# done
 
 # Run tests again with REPLACE_CUBLAS set
 #for item in "${test_list[@]}"; do

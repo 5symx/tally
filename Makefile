@@ -7,6 +7,6 @@ build: FORCE
 	cd third_party/nccl && make -j src.build NVCC_GENCODE="-gencode=arch=compute_89,code=sm_89"
 	cd third_party/nccl/ext-net/example && make
 	mkdir -p build
-	cd build && cmake -DCMAKE_CUDA_STANDARD=17  -DENABLE_LOGGING=OFF -DSERVER_VERSION=$(SERVER_VERSION) -DLLAMA_CPP_DIR=/home/ymx/llama.cpp ..  && make -j
+	cd build && cmake -DCMAKE_CUDA_STANDARD=17  -DENABLE_LOGGING=OFF -DSERVER_VERSION=$(SERVER_VERSION) -DLLAMA_CPP_DIR=/home/llama.cpp ..  && make -j
 
 FORCE: ;
