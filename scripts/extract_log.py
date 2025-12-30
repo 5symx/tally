@@ -36,8 +36,8 @@ def extract_split_log_entries(log_file_path, count_value):
     return results
 
 # Directories
-log_dir = "./updated_1029"
-csv_dir = "./result"
+log_dir = "../result_data/updated_1118"
+csv_dir = "../result_data/result2"
 os.makedirs(csv_dir, exist_ok=True)
 
 # Process each .log file

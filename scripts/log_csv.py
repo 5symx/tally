@@ -92,11 +92,29 @@ def extract_total_times(csv_path):
 
 
 # ideal print
-naive_csv = './result/naive-con1-1b.csv'
-group_naive = extract_decode_times(naive_csv)
+naive_csv = '../result_data/result/naive-con1-27b.csv'
+group_naive = extract_speed(naive_csv)
 mean_naive = summarize(group_naive, "Group ideal")
 
+naive_csv = '../result_data/result2/naive2-conv1-10-27b.csv'
+group_naive = extract_speed(naive_csv)[1:]
+mean_naive = summarize(group_naive, "Group ideal")
+
+naive_csv = '../result_data/result/naive-con10-27b.csv'
+group_naive = extract_speed(naive_csv)
+mean_naive = summarize(group_naive, "Group ideal")
+
+naive_csv = '../result_data/result/mps-con10-27b.csv'
+group_naive = extract_speed(naive_csv)
+mean_naive = summarize(group_naive, "Group ideal")
+
+
+naive_csv = '../result_data/result/gm-con10-27b.csv'
+group_naive = extract_speed(naive_csv)
+mean_naive = summarize(group_naive, "Group ideal")
+
+
 # # File paths
-# naive_csv = './result/naive-con5-1b.csv'
-# mps_csv = './result/mps-con5-1b.csv'
-# gms_csv = './result/gm-con5-1b.csv'
+# naive_csv = './result/naive-con5-27b.csv'
+# mps_csv = './result/mps-con5-27b.csv'
+# gms_csv = './result/gm-con5-27b.csv'

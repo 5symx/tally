@@ -64,8 +64,11 @@ run_naive_test() {
     sleep 5
 
     # Launch client process
+    for i in {0..9}; do
+        python3 ./scripts/SC-client.py --size $MODEL_SIZE --conv $CONV_NUM
+    done
 
-    python3 ./scripts/SC-client.py --size $MODEL_SIZE --conv $CONV_NUM
+    # python3 ./scripts/SC-client.py --size $MODEL_SIZE --conv $CONV_NUM
     
     sleep 3
 } 
