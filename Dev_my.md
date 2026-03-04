@@ -41,7 +41,7 @@ make SERVER_VERSION=server_fr3
 sudo ./scripts/run_all_tests_naive.sh 15
 sudo ./scripts/run_test.sh server_fr3 2>&1 | tee output-1026.log
 sudo ./scripts/run_test.sh server_fr3 1 10 2>&1 | grep -v 'EOG' > naive-con${conv_number}-1b.log
-sudo ./scripts/run_test.sh server_fr3 27 1 2>&1 | grep -v 'EOG' > naive2-conv1-10-27b.log
+sudo ./scripts/run_test.sh server_fr3 27 2 2>&1 | grep -v 'EOG' > naive2-conv1-10-27b.log
 
 find /usr -name "libnvidia-ml.so*" 2>/dev/null
 sudo ln -s /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1 /usr/lib/x86_64-linux-gnu/libnvidia-ml.so
@@ -58,3 +58,5 @@ switching client:
 tally_client / tally_client_local - modify SC-Client.py args = shlex.split(command)
 Latest server:
 server_fr3 
+llama.cpp:
+update llama.cpp/CMake.txt for tally_client.so loaction.

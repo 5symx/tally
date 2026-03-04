@@ -6,9 +6,10 @@ CONV_NUM=$3
 # LLAMA_CPP_DIR=/home/llama.cpp
 
 export CUDA_VISIBLE_DEVICES="0"
-export TALLY_HOME=/home/tally
+export TALLY_HOME=/home/ymx/tally
 export PATH=$PATH:/usr/local/cuda/bin
 export XDG_CACHE_HOME=/home/.cache
+export TMPDIR=/home/ymx/my_tmp
 
 if [ -z "$SERVER_VERSION" ]; then
     echo "Error: SERVER_VERSION is not set!"
@@ -38,11 +39,11 @@ run_tally_test() {
 
     # Launch client process
 
-    # python3 ./scripts/SC-client.py
+    python3 ./scripts/SC-client.py --size $MODEL_SIZE --conv $CONV_NUM --backend "gms"
     
     # sleep 3
 
-    ./scripts/start_client.sh './build/tests/elementwise' # check
+    # ./scripts/start_client.sh './build/tests/elementwise' # check
 
     sleep 3
 
@@ -67,11 +68,11 @@ run_naive_test() {
     sleep 5
 
     # Launch client process
-    for i in {0..9}; do
-        python3 ./scripts/SC-client.py --size $MODEL_SIZE --conv $CONV_NUM
-    done
+    # for i in {0..9}; do
+    #     python3 ./scripts/SC-client.py --size $MODEL_SIZE --conv $CONV_NUM
+    # done
 
-    # python3 ./scripts/SC-client.py --size $MODEL_SIZE --conv $CONV_NUM
+    python3 ./scripts/SC-client.py --size $MODEL_SIZE --conv $CONV_NUM --backend "naive"
     
     sleep 3
 } 
@@ -98,7 +99,8 @@ set -e
 apt-get install -y libcurl4-openssl-dev 
 
 cd ../llama.cpp &&  \
-cmake -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
+cmake -B build \
+      -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
       -DCUDAToolkit_ROOT=/usr/local/cuda \
       -DGGML_CUDA=ON \
       -DCMAKE_CUDA_ARCHITECTURES="86" \
@@ -116,6 +118,7 @@ echo "Starting the make..."
 make SERVER_VERSION=$SERVER_VERSION
 #cd tests && cd cudnn_samples_v8 && make && cd .. && cd ..
 
+
 ./scripts/kill_server.sh & 
 sleep 5
 
@@ -130,13 +133,14 @@ sleep 5
 #     run_tally_test "$item"
 # done
 
+# for i in {0..1}; do # 10
+#     run_tally_test 
+# done
+
 for i in {0..1}; do # 10
-    run_tally_test 
+    run_naive_test 
 done
 
-# for i in {0..30}; do
-#     run_naive_test 
-# done
 
 # Run tests again with REPLACE_CUBLAS set
 #for item in "${test_list[@]}"; do

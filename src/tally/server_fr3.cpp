@@ -1134,7 +1134,7 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
                         // {
                             response->err = cudaSuccess;
                             client_data_all[client_id].rc_mem = true;
-                            TALLY_SPD_WARN("recovery current mr size " + std::to_string(client_data_all[client_id].mapped_id));
+                            TALLY_SPD_WARN("recovery ID memory with current mr size " + std::to_string(client_data_all[client_id].mapped_id));
                         // }
                     }
                     else

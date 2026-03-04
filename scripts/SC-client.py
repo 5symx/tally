@@ -28,12 +28,13 @@ trace = [
     
 ]
 
-def client(trace, size, conv):
+def client(trace, size, conv, backend):
     """
     Executes a trace of commands, launching each one in the background
     and then sleeping for the specified duration before launching the next.
     """
     print("Starting trace replay...")
+    print(f"backend is {backend}")
     
     # Keep track of the processes we start
     processes = []
@@ -47,9 +48,10 @@ def client(trace, size, conv):
                 # We construct the command line to call our shell script.
                 # The script name is the first part, and the command to run is the second.
                 # This is robust and avoids shell injection issues.
-
-                # args = ['./scripts/start_client.sh', command] # test for gm
-                args = shlex.split(command)
+                if backend == "gms":
+                    args = ['./scripts/start_client.sh', command] # test for gm
+                else:
+                    args = shlex.split(command)
 
                 # subprocess.Popen launches the command in a new process
                 # without blocking the execution of this script.
@@ -81,8 +83,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--size", type=int, required=True, help="Size parameter")
     parser.add_argument("--conv", type=int, required=True, help="conv number")
+    parser.add_argument("--backend", type=str, required=True, help="backend choose from [gms, naive]")
     args = parser.parse_args()
     size = args.size
     conv = args.conv
+    backend = args.backend
 
-    client(trace, size, conv)
+    client(trace, size, conv, backend)
