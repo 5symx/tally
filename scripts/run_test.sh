@@ -6,6 +6,7 @@ CONV_NUM=$3
 # LLAMA_CPP_DIR=/home/llama.cpp
 
 export CUDA_VISIBLE_DEVICES="0"
+# export TALLY_HOME=/home/ymx/tally
 export TALLY_HOME=/home/ymx/tally
 export PATH=$PATH:/usr/local/cuda/bin
 export XDG_CACHE_HOME=/home/.cache
@@ -23,6 +24,34 @@ cleanup() {
     # rm -rf ~/.cache/tally/transform/*
 }
 
+LLAMA_CMD_simple=(
+    "/home/ymx/llama.cpp/build/bin/llama-simple"
+    "-m" "/data0/ymx/cache/llama.cpp/ggml-org_gemma-3-1b-it-GGUF_gemma-3-1b-it-Q4_K_M.gguf"
+    "-ngl" "99"
+    "once upon a time"
+)
+
+LLAMA_CMD_cli=(
+    /home/ymx/llama.cpp/build/bin/llama-cli 
+    -c 2048 
+    -m "/data0/ymx/cache/llama.cpp/models--bartowski--Meta-Llama-3.1-8B-Instruct-GGUF/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf" 
+    --lora "/data0/ymx/cache/llama.cpp/models--ngxson--Llama-3-Instruct-abliteration-LoRA-8B-F16-GGUF/Llama-3-Instruct-abliteration-LoRA-8B-f16.gguf" 
+    -p "Once upon a time" 
+    -n 128 
+    -ngl 99 
+    -st
+)
+
+LLAMA_CMD_server=(
+    /home/ymx/llama.cpp/build/bin/llama-server
+    -c 2048 
+    -m "/data0/ymx/cache/llama.cpp/models--bartowski--Meta-Llama-3.1-8B-Instruct-GGUF/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf" 
+    --lora "/data0/ymx/cache/llama.cpp/models--ngxson--Llama-3-Instruct-abliteration-LoRA-8B-F16-GGUF/Llama-3-Instruct-abliteration-LoRA-8B-f16.gguf" 
+    --port 8080 
+    --host 0.0.0.0
+    -ngl 99
+)
+
 run_tally_test() {
 
     # Launch tally server in the background
@@ -39,17 +68,19 @@ run_tally_test() {
 
     # Launch client process
 
-    python3 ./scripts/SC-client.py --size $MODEL_SIZE --conv $CONV_NUM --backend "gms"
-    
+    # python3 ./scripts/SC-client.py --size $MODEL_SIZE --conv $CONV_NUM --backend "gms"
+
     # sleep 3
 
     # ./scripts/start_client.sh './build/tests/elementwise' # check
 
+    # sleep 3
+
+    # ./scripts/start_client.sh '/home/ymx/llama.cpp/build/bin/llama-simple -m /data0/ymx/cache/llama.cpp/ggml-org_gemma-3-1b-it-GGUF_gemma-3-1b-it-Q4_K_M.gguf -ngl 99 "once upon a time"'
+
+    ./scripts/start_client.sh "${LLAMA_CMD_server[@]}"
+
     sleep 3
-
-    # ./scripts/start_client.sh '/home/ymx/llama.cpp/build/bin/llama-simple -m /home/ymx/.cache/llama.cpp/ggml-org_gemma-3-4b-it-GGUF_gemma-3-4b-it-Q4_K_M.gguf -ngl 99 "once upon a time"'
-
-    # # sleep 3
 
     # ./scripts/start_client.sh "$@" #./build/tests/elementwise
 
@@ -98,11 +129,16 @@ set -e
 
 apt-get install -y libcurl4-openssl-dev 
 
+echo "Starting the make..."
+# Build tally and tests
+make SERVER_VERSION=$SERVER_VERSION
+
 cd ../llama.cpp &&  \
 cmake -B build \
       -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
       -DCUDAToolkit_ROOT=/usr/local/cuda \
       -DGGML_CUDA=ON \
+      -DGGML_TALLY=ON \
       -DCMAKE_CUDA_ARCHITECTURES="86" \
       -DGGML_CUDA_NO_VMM=ON \
       -DGGML_CUDA_FORCE_CUBLAS=ON \
@@ -113,9 +149,7 @@ cmake -B build \
 cmake --build build --config Release -j$(nproc) && \
 cd ../tally
 
-echo "Starting the make..."
-# Build tally and tests
-make SERVER_VERSION=$SERVER_VERSION
+
 #cd tests && cd cudnn_samples_v8 && make && cd .. && cd ..
 
 
@@ -133,13 +167,13 @@ sleep 5
 #     run_tally_test "$item"
 # done
 
-# for i in {0..1}; do # 10
-#     run_tally_test 
-# done
-
-for i in {0..1}; do # 10
-    run_naive_test 
+for i in {0..0}; do # 10
+    run_tally_test 
 done
+
+# for i in {0..1}; do # 10
+#     run_naive_test 
+# done
 
 
 # Run tests again with REPLACE_CUBLAS set

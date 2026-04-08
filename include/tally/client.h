@@ -11,6 +11,7 @@
 #include <iostream>
 #include <cassert>
 #include <sstream>
+#include <unordered_map>
 #include <unistd.h>
 
 #include "iceoryx_dust/posix_wrapper/signal_watcher.hpp"
@@ -56,46 +57,54 @@ public:
 
     ~TallyClient(){}
 
-    
+    static const std::unordered_map<std::string, int>& model_name_to_id_map()
+    {
+        // Add new models here to assign stable IDs.
+        static const std::unordered_map<std::string, int> model_map = {
+            {"ggml-org_gemma-3-1b-it-GGUF_gemma-3-1b-it-Q4_K_M.gguf", 1},
+            {"Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf", 2},
+        };
+        return model_map;
+    }
 
+    // void setM_ID(const std::string& full_file_path) {
+    //     size_t base_pos = full_file_path.find_last_of("/\\");
+    //     std::string model_name = (base_pos == std::string::npos) ? full_file_path : full_file_path.substr(base_pos + 1);
+    //     m_id_str = model_name;
 
-    void setM_ID(const std::string& full_file_path) {
-        size_t start_pos = full_file_path.find("ggml-org_gemma-3-");
+    //     const auto& model_map = model_name_to_id_map();
+    //     auto it = model_map.find(model_name);
+    //     if (it != model_map.end()) {
+    //         mapped_id = it->second;
+    //     } else {
+    //         mapped_id = -1;
+    //         std::cerr << "Warning: model is not in model_name_to_id_map, using mapped_id=-1. model=" << model_name << std::endl;
+    //     }
 
-        if (start_pos == std::string::npos) {
-            std::cerr << "Error: Could not find 'ggml-org_gemma-3-' prefix in path: " << full_file_path << std::endl;
-            m_id_str = "";
-            mapped_id = -1;
-            return;
+    //     std::cout << "set client model id to: " << mapped_id << std::endl;
+    //     // exit(1);
+    // }
+    void setM_ID(const std::string& full_file_path) 
+    {
+        m_id_str = full_file_path;
+        mapped_id = -1; // Default to -1
+
+        const auto& model_map = model_name_to_id_map();
+
+        // Loop through the map and check if the key is a substring of the path
+        for (const auto& [key, id] : model_map) {
+            if (full_file_path.find(key) != std::string::npos) {
+                mapped_id = id;
+                m_id_str = key; // Update to the "stable" name for cleaner logs
+                break; 
+            }
         }
-        
-        start_pos += std::string("ggml-org_gemma-3-").length();
 
-
-        size_t end_pos = full_file_path.find("b-it-GGUF_", start_pos);
-        if (end_pos == std::string::npos) {
-            std::cerr << "Error: Could not find 'b-it-GGUF' suffix in path: " << full_file_path << std::endl;
-            m_id_str = "";
-            mapped_id = -1;
-            return;
+        if (mapped_id == -1) {
+            std::cerr << "Warning: No known model name found in path: " << full_file_path << std::endl;
+        } else {
+            std::cout << "Matched Model ID: " << mapped_id << " for path: " << m_id_str << std::endl;
         }
-
-        // Extract the substring between "file_" and ".log"
-        m_id_str = full_file_path.substr(start_pos, end_pos - start_pos);
-
-        try {
-            // Attempt to convert the string MID to an integer
-            mapped_id = std::stoi(m_id_str); // ggml-org_gemma-3-1
-        } catch (const std::invalid_argument& e) {
-            std::cerr << "Error: Invalid MID format '" << m_id_str << "'. Not a valid integer. " << e.what() << std::endl;
-            mapped_id = -1; // Indicate error
-        } catch (const std::out_of_range& e) {
-            std::cerr << "Error: MID '" << m_id_str << "' out of integer range. " << e.what() << std::endl;
-            mapped_id = -1; // Indicate error
-        }
-
-        std::cout << "set client model id to: " << mapped_id << std::endl;
-        // exit(1);
     }
 
     // void process_args(int argc, char** argv) {
