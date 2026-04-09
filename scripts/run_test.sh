@@ -1,7 +1,7 @@
 #!/bin/bash
 SERVER_VERSION=$1
-MODEL_SIZE=$2
-CONV_NUM=$3
+MODEL_ID=$2
+# CONV_NUM=$3
 
 # LLAMA_CPP_DIR=/home/llama.cpp
 
@@ -68,7 +68,9 @@ run_tally_test() {
 
     # Launch client process
 
-    # python3 ./scripts/SC-client.py --size $MODEL_SIZE --conv $CONV_NUM --backend "gms"
+    # python3 ./scripts/SC-client.py --id $MODEL_ID --conv $CONV_NUM --backend "gms"
+
+    python3 ./scripts/SC-client.py --id $MODEL_ID --backend "gms"
 
     # sleep 3
 
@@ -78,7 +80,7 @@ run_tally_test() {
 
     # ./scripts/start_client.sh '/home/ymx/llama.cpp/build/bin/llama-simple -m /data0/ymx/cache/llama.cpp/ggml-org_gemma-3-1b-it-GGUF_gemma-3-1b-it-Q4_K_M.gguf -ngl 99 "once upon a time"'
 
-    ./scripts/start_client.sh "${LLAMA_CMD_server[@]}"
+    # ./scripts/start_client.sh "${LLAMA_CMD_server[@]}"
 
     sleep 3
 
@@ -103,7 +105,7 @@ run_naive_test() {
     #     python3 ./scripts/SC-client.py --size $MODEL_SIZE --conv $CONV_NUM
     # done
 
-    python3 ./scripts/SC-client.py --size $MODEL_SIZE --conv $CONV_NUM --backend "naive"
+    python3 ./scripts/SC-client.py --id $MODEL_id --backend "naive"
     
     sleep 3
 } 

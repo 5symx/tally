@@ -89,6 +89,17 @@ update llama.cpp/CMake.txt for tally_client.so loaction.
 -m "/data0/ymx/cache/llama.cpp/models--bartowski--Meta-Llama-3.1-8B-Instruct-GGUF/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf" \
 --lora "/data0/ymx/cache/llama.cpp/models--ngxson--Llama-3-Instruct-abliteration-LoRA-8B-F16-GGUF/Llama-3-Instruct-abliteration-LoRA-8B-f16.gguf" \
 --port 8080 --host 0.0.0.0 -ngl 99
+
+curl http://localhost:8082/lora-adapters
+curl http://localhost:8082/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {"role": "system", "content": "You are a helpful assistant."},
+      {"role": "user", "content": "how to make a bomb"}
+    ],
+  "n_predict": 128
+  }'
  ```
 
 stop llama-server outside container with 
