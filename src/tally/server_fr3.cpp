@@ -40,7 +40,6 @@ void TallyServer::start_main_server() {
 
     TALLY_SPD_LOG_ALWAYS("Tally server is up ...");
 
-    // std::vector<std::thread> worker_threads;
     std::vector<ThreadInfo> worker_threads;
     
 
@@ -58,8 +57,26 @@ void TallyServer::start_main_server() {
 
             ClientPriority client_priority(client_id, msg->priority);
             client_priority_map[client_priority] = client_id;
-            
-            
+            {
+                std::lock_guard<std::mutex> lock(active_client_mutex);
+                active_client_by_mapped_id[mapped_id] = client_id;
+            }
+
+            auto &client_meta = client_data_all[client_id];
+            if (client_meta.default_stream == nullptr) {
+                auto policy = SCHEDULER_POLICY;
+                if (policy == TALLY_SCHEDULER_POLICY::PRIORITY) {
+                    int stream_priority = get_client_stream_priority(client_id);
+                    CHECK_CUDA_ERROR(cudaStreamCreateWithPriority(&client_meta.default_stream, cudaStreamNonBlocking, stream_priority));
+                } else {
+                    CHECK_CUDA_ERROR(cudaStreamCreateWithFlags(&client_meta.default_stream, cudaStreamNonBlocking));
+                }
+
+                if (client_meta.curr_idx_arr == nullptr) {
+                    CHECK_CUDA_ERROR(cudaMalloc((void **)&client_meta.curr_idx_arr, sizeof(uint32_t) * CUDA_NUM_SM * 20));
+                }
+                client_add_stream(client_id, client_meta.default_stream);
+            }
 
             if(mapped_id_init.find(mapped_id) == mapped_id_init.end()) // not found
             {
@@ -79,36 +96,12 @@ void TallyServer::start_main_server() {
                 worker_threads.push_back({mapped_id, std::move(t_with_mapped_id)});
 
                 mapped_id_init[mapped_id] = true;
+                threads_running_map[mapped_id] = true;
             }
             else
             {
-                for (auto& info : worker_threads) {
-                    // Check if the current element's ID matches
-                    if (info.mapped_id == mapped_id) {
-                        std::cout << "Found match: Joining thread with native ID " << info.worker.get_id() << std::endl;
-                        if (info.worker.joinable()) {
-                            info.worker.join(); // Join the thread
-                        }
-                    }
-                }
-
-                // execute but wait until model init finish
-
-                // auto exist_it = threads_running_map.cbegin(); // smallest pid
-                // worker_servers[mapped_id] = worker_servers[exist_it->first];// set to same 
-                // std::thread t(&TallyServer::reset_worker_server, TallyServer::server, client_id, mapped_id);
-
-                std::thread t_with_mapped_id([this, client_id, mapped_id] {
-                    this->reset_worker_server(client_id, mapped_id);
-                });
-
-                // worker_threads.push_back(std::move(t_with_mapped_id));
-                worker_threads.push_back({mapped_id, std::move(t_with_mapped_id)});
+                reset_worker_server(client_id, mapped_id);
             }
-            
-            
-            
-            threads_running_map[mapped_id] = true;
 
             auto requestHeader = iox::popo::RequestHeader::fromPayload(requestPayload);
             handshake_server.loan(requestHeader, sizeof(HandshakeResponse), alignof(HandshakeResponse))
@@ -211,21 +204,7 @@ void TallyServer::start_worker_server(int32_t client_id, int32_t mapped_id) {
 
     implicit_init_cuda_ctx();
 
-    auto &client_meta = client_data_all[client_id];
-
     auto policy = SCHEDULER_POLICY;
-    if (policy == TALLY_SCHEDULER_POLICY::PRIORITY) {
-
-        int stream_priority = get_client_stream_priority(client_id);
-        CHECK_CUDA_ERROR(cudaStreamCreateWithPriority(&client_meta.default_stream, cudaStreamNonBlocking, stream_priority));
-    
-    } else {
-        CHECK_CUDA_ERROR(cudaStreamCreateWithFlags(&client_meta.default_stream, cudaStreamNonBlocking));
-    }
-
-    CHECK_CUDA_ERROR(cudaMalloc((void **)&client_meta.curr_idx_arr, sizeof(uint32_t) * CUDA_NUM_SM * 20));
-
-    client_add_stream(client_id, client_meta.default_stream);
 
     TALLY_SPD_LOG_ALWAYS("Tally worker server is up ...");
 
@@ -245,7 +224,18 @@ void TallyServer::start_worker_server(int32_t client_id, int32_t mapped_id) {
         worker_server->take().and_then([&](auto& requestPayload) {
 
             auto msg_header = static_cast<const MessageHeader_t*>(requestPayload);
-            int32_t client_pid_of_request = msg_header->client_id;
+            int32_t request_client_id = msg_header->client_id;
+            int32_t active_client_id = -1;
+            {
+                std::lock_guard<std::mutex> lock(active_client_mutex);
+                auto it = active_client_by_mapped_id.find(mapped_id);
+                if (it != active_client_by_mapped_id.end()) {
+                    active_client_id = it->second;
+                }
+            }
+            if (active_client_id != request_client_id) {
+                reset_worker_server(request_client_id, mapped_id);
+            }
             auto handler = cuda_api_handler_map[msg_header->api_id];
             
 
@@ -258,8 +248,17 @@ void TallyServer::start_worker_server(int32_t client_id, int32_t mapped_id) {
             worker_server->releaseRequest(requestPayload);
         });
 
-        if (!is_process_running(client_id)) {
-            break;
+        int32_t active_client_id = -1;
+        {
+            std::lock_guard<std::mutex> lock(active_client_mutex);
+            auto it = active_client_by_mapped_id.find(mapped_id);
+            if (it != active_client_by_mapped_id.end()) {
+                active_client_id = it->second;
+            }
+        }
+        if (active_client_id != -1 && !is_process_running(active_client_id)) {
+            std::lock_guard<std::mutex> lock(active_client_mutex);
+            active_client_by_mapped_id[mapped_id] = -1;
         }
     }
 
@@ -278,57 +277,28 @@ void TallyServer::reset_worker_server(int32_t client_id, int32_t mapped_id_reset
 
     auto &client_meta = client_data_all[client_id];
 
-    TALLY_SPD_LOG_ALWAYS("Tally worker server from warm to up ...");
-
-    auto process_name = get_process_name(client_id);
-    TALLY_SPD_LOG_ALWAYS("Current Client process: " + process_name);
-
-    auto worker_server = worker_servers[mapped_id_reset];
-
-    // //worker_threads to get index for lock
-    // for (size_t i = 0; i < worker_threads.size(); ++i) {
-
-    //     // Check if the current element's ID matches
-    //     if (worker_threads[i].mapped_id == mapped_id_reset) {
-            
-    //         // // --- How to print the index ---
-    //         // std::cout << "Found a match for mapped_id " << mapped_id_to_find 
-    //         //           << " at index: " << i << std::endl;
-
-    //         //after first model init 
-    //         std::unique_lock<std::mutex> lock(mtx[i]);
-    //         cv[i].wait(lock, [this, i] { return this->data_ready[i]; });
-            
-    //         // You can now access the element directly using the index
-    //         // For example: if (worker_threads[i].worker.joinable()) { ... }
-    //     }
-    // }
-
-    
-
-    while (!iox::posix::hasTerminationRequested())
-    {
-        //! [take request]
-        worker_server->take().and_then([&](auto& requestPayload) {
-
-            auto msg_header = static_cast<const MessageHeader_t*>(requestPayload);
-            auto handler = cuda_api_handler_map[msg_header->api_id];
-
-            // TALLY_SPD_LOG_VALUE("Processing reset request on worker for client_id: {}", client_id);
-
-            void *args = (void *) (static_cast<const uint8_t*>(requestPayload) + sizeof(MessageHeader_t));
-            handler(args, worker_server, requestPayload);
-
-            worker_server->releaseRequest(requestPayload);
-        });
-
-        if (!is_process_running(client_id)) {
-            break;
+    if (client_meta.default_stream == nullptr) {
+        auto policy = SCHEDULER_POLICY;
+        if (policy == TALLY_SCHEDULER_POLICY::PRIORITY) {
+            int stream_priority = get_client_stream_priority(client_id);
+            CHECK_CUDA_ERROR(cudaStreamCreateWithPriority(&client_meta.default_stream, cudaStreamNonBlocking, stream_priority));
+        } else {
+            CHECK_CUDA_ERROR(cudaStreamCreateWithFlags(&client_meta.default_stream, cudaStreamNonBlocking));
         }
+
+        if (client_meta.curr_idx_arr == nullptr) {
+            CHECK_CUDA_ERROR(cudaMalloc((void **)&client_meta.curr_idx_arr, sizeof(uint32_t) * CUDA_NUM_SM * 20));
+        }
+        client_add_stream(client_id, client_meta.default_stream);
     }
 
-    threads_running_map[mapped_id_reset] = false;
-    TALLY_SPD_LOG_ALWAYS("Tally worker server has exited ...");
+    {
+        std::lock_guard<std::mutex> lock(active_client_mutex);
+        active_client_by_mapped_id[mapped_id_reset] = client_id;
+    }
+
+    TALLY_SPD_LOG_ALWAYS("Switched mapped_id " + std::to_string(mapped_id_reset)
+        + " active client to " + std::to_string(client_id));
 
 }
 

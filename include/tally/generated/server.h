@@ -12,6 +12,7 @@
 #include <memory>
 #include <atomic>
 #include <cfloat>
+#include <mutex>
 
 #include <cuda_runtime.h>
 #include <cuda.h>
@@ -159,6 +160,8 @@ public:
 	std::map<int32_t, std::atomic<bool>> threads_running_map;
 
 	std::map<int32_t, std::atomic<bool>> mapped_id_init;
+	std::map<int32_t, int32_t> active_client_by_mapped_id;
+	std::mutex active_client_mutex;
     
 	// ==================== Global state =====================
 	std::unordered_map<CUDA_API_ENUM, std::function<void(void *, iox::popo::UntypedServer *, const void* const)>> cuda_api_handler_map;

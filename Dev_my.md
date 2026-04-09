@@ -91,7 +91,7 @@ update llama.cpp/CMake.txt for tally_client.so loaction.
 --port 8080 --host 0.0.0.0 -ngl 99
 
 curl http://localhost:8082/lora-adapters
-curl http://localhost:8082/v1/chat/completions \
+curl http://localhost:8083/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "messages": [
@@ -108,4 +108,12 @@ docker exec ac5699ef0605 pkill llama-server
 
 docker exec <container_id> pgrep -af llama-server
 docker exec <container_id> kill <PID>
+```
+
+### test switching 
+```bash
+sudo ./scripts/run_test.sh server_fr3 2,3
+concurrent running 
+curl http://localhost:8082/lora-adapters
+curl http://localhost:8083/lora-adapters
 ```

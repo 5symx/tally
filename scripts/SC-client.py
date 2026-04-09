@@ -111,6 +111,7 @@ def client(trace, selected_ids, backend):
         # if round_sleep > 0:
         #     print(f"    ...sleeping for {round_sleep} second(s).")
         #     time.sleep(round_sleep)
+        time.sleep(10)
 
     print("\nTrace sequence launched. Waiting for all background processes to complete...")
 
