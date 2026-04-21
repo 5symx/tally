@@ -97,6 +97,11 @@ void TallyServer::start_main_server() {
 
                 mapped_id_init[mapped_id] = true;
                 threads_running_map[mapped_id] = true;
+                //add
+                finish_init[mapped_id] = false;
+                finish_init_done[mapped_id] = false;
+                replay_round[mapped_id] = false;
+                primary_client_by_mapped_id[mapped_id] = client_id;
             }
             else
             {
@@ -264,7 +269,7 @@ void TallyServer::start_worker_server(int32_t client_id, int32_t mapped_id) {
 
     threads_running_map[mapped_id] = false;
     // first_round = false;
-    replay_round[mapped_id] = true;
+    replay_round[mapped_id] = true; //move to cudamalloc
 
 
 
@@ -296,6 +301,20 @@ void TallyServer::reset_worker_server(int32_t client_id, int32_t mapped_id_reset
         std::lock_guard<std::mutex> lock(active_client_mutex);
         active_client_by_mapped_id[mapped_id_reset] = client_id;
     }
+
+    // Enable replay as soon as a non-primary client takes over after initial
+    // model allocation is captured, without waiting for worker-thread exit.
+    auto owner_it = primary_client_by_mapped_id.find(mapped_id_reset);
+    if (owner_it != primary_client_by_mapped_id.end() &&
+        owner_it->second != client_id &&
+        finish_init_done[mapped_id_reset])
+    {
+        replay_round[mapped_id_reset] = true;
+        TALLY_SPD_LOG_ALWAYS("Enabled replay for mapped_id " + std::to_string(mapped_id_reset) +
+            " after switching from primary client " + std::to_string(owner_it->second) +
+            " to client " + std::to_string(client_id));
+    }
+        
 
     TALLY_SPD_LOG_ALWAYS("Switched mapped_id " + std::to_string(mapped_id_reset)
         + " active client to " + std::to_string(client_id));
@@ -1035,7 +1054,7 @@ void TallyServer::handle_cuda_allocation_with_mid(cudaMallocResponse* response, 
     } else {
         response->err = cudaErrorMemoryAllocation;
         response->devPtr = nullptr; // Ensure devPtr is null on failure
-        TALLY_SPD_WARN("Encountered cudaErrorMemoryAllocation " + std::string(__FILE__) + ":" + std::to_string(__LINE__));
+        TALLY_SPD_WARN("Encountered cudaErrorMemoryAllocation for cudaMalloc " + std::string(__FILE__) + ":" + std::to_string(__LINE__));
     }
 }
 
@@ -1052,15 +1071,29 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
         .and_then([&](auto& responsePayload) {
 
             auto response = static_cast<cudaMallocResponse*>(responsePayload);
-            if(!replay_round[client_data_all[client_id].mapped_id]) // first round
+            auto mapped_id = client_data_all[client_id].mapped_id;
+            bool is_primary_client = false;
+            auto owner_it = primary_client_by_mapped_id.find(mapped_id);
+            if (owner_it != primary_client_by_mapped_id.end()) {
+                is_primary_client = (owner_it->second == client_id);
+            }
+            const bool should_use_replay_path = replay_round[mapped_id] && !is_primary_client;
+
+            if(!should_use_replay_path) // primary or pre-replay path
             {
-                if(!finish_init[client_data_all[client_id].mapped_id]) // before first kernel launch
+                if(!finish_init[mapped_id]) // before first kernel launch
                 {
-                    handle_cuda_allocation_with_mid(response, args, dev_addr_map, client_data_all[client_id].dev_addr_map, client_data_all[client_id].mapped_id, true);
-                    finish_init[client_data_all[client_id].mapped_id] = true; // only first cudamalloc is for reuse model
+                    handle_cuda_allocation_with_mid(response, args, dev_addr_map, client_data_all[client_id].dev_addr_map, mapped_id, true);
+                    finish_init[mapped_id] = true; // only first cudamalloc is for reuse model
                 }
                 else
                 {
+                    finish_init_done[mapped_id] = true;
+                    if(client_data_all[client_id].first_init == false)
+                    {
+                        TALLY_SPD_LOG("set first_init for disable bypass for future.");
+                        client_data_all[client_id].first_init = true;
+                    }
                     handle_cuda_allocation_with_mid(response, args, dev_addr_map, client_data_all[client_id].dev_addr_map, -1, false);
 
                     // for (size_t i = 0; i < worker_threads.size(); ++i) {
@@ -1089,10 +1122,10 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
             }
             else // reuse exist cudaMalloc content - init for memory
             {
-                if(client_data_all[client_id].rc_mem == false && client_data_all[client_id].mapped_id != -1)
+                if(client_data_all[client_id].rc_mem == false && mapped_id != -1)
                 {
                     // TALLY_SPD_WARN("current rc memory id " + std::to_string(client_data_all[client_id].rc_mem_Size));
-                    response->devPtr = get_addr_by_init_memory_id(dev_addr_map, client_data_all[client_id].mapped_id);
+                    response->devPtr = get_addr_by_init_memory_id(dev_addr_map, mapped_id);
                     if (response->devPtr != nullptr)
                     {
                         // if(client_data_all[client_id].rc_mem_Size > 0)
@@ -1104,7 +1137,7 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
                         // {
                             response->err = cudaSuccess;
                             client_data_all[client_id].rc_mem = true;
-                            TALLY_SPD_WARN("recovery ID memory with current mr size " + std::to_string(client_data_all[client_id].mapped_id));
+                            TALLY_SPD_WARN("recovery ID memory with current mr size " + std::to_string(mapped_id));
                         // }
                     }
                     else
@@ -1117,7 +1150,11 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
                 else
                 {
                     if(client_data_all[client_id].first_init == false)
+                    {
+                        TALLY_SPD_LOG("set first_init for disable bypass for future.");
                         client_data_all[client_id].first_init = true;
+                    }
+                        
                     handle_cuda_allocation_with_mid(response, args, dev_addr_map, client_data_all[client_id].dev_addr_map, -1, false);
                 }
             }

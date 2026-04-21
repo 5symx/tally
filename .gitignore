@@ -74,3 +74,5 @@ start_mps.sh
 my_tmp/*
 cudnn/*
 build_1231/
+
+src/tally/server_fr3 copy.cpp

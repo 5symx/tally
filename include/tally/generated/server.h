@@ -142,6 +142,7 @@ public:
 
 	//add 
 	std::map<int32_t, std::atomic<bool>> finish_init;
+	std::map<int32_t, std::atomic<bool>> finish_init_done;
 	std::map<int32_t, std::atomic<bool>> replay_round;
 	// std::atomic<bool> first_round = true;
 	std::vector<mem_region> dev_addr_map;
@@ -160,6 +161,7 @@ public:
 	std::map<int32_t, std::atomic<bool>> threads_running_map;
 
 	std::map<int32_t, std::atomic<bool>> mapped_id_init;
+	std::map<int32_t, int32_t> primary_client_by_mapped_id;
 	std::map<int32_t, int32_t> active_client_by_mapped_id;
 	std::mutex active_client_mutex;
     

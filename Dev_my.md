@@ -111,9 +111,10 @@ docker exec <container_id> kill <PID>
 ```
 
 ### test switching 
+concurrent running  - check!
 ```bash
 sudo ./scripts/run_test.sh server_fr3 2,3
-concurrent running 
+
 curl http://localhost:8082/lora-adapters
 curl http://localhost:8083/lora-adapters
 ```
