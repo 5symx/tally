@@ -8,6 +8,8 @@
 #include <condition_variable>
 #include <cstdlib>
 #include <sstream>
+#include <chrono>
+#include <thread>
 
 #include <tally/transform.h>
 #include <tally/util.h>
@@ -46,6 +48,109 @@ struct MallocWindowState {
 
 std::mutex malloc_window_state_mutex;
 std::unordered_map<int32_t, MallocWindowState> malloc_window_state_by_mapped_id;
+
+struct ClientSwitchSliceState {
+    int32_t slice_owner_client_id = -1;
+    std::chrono::steady_clock::time_point slice_started_at = std::chrono::steady_clock::now();
+};
+
+std::mutex client_switch_slice_mutex;
+std::unordered_map<int32_t, ClientSwitchSliceState> client_switch_slice_by_mapped_id;
+
+uint64_t client_switch_timeslice_ms()
+{
+    static const uint64_t kDefaultTimesliceMs = 50;
+    static const uint64_t parsed_value = []() -> uint64_t {
+        if (const char* env = std::getenv("TALLY_CLIENT_SWITCH_TIMESLICE_MS")) {
+            try {
+                const auto parsed = std::stoll(env);
+                if (parsed > 0) {
+                    return static_cast<uint64_t>(parsed);
+                }
+            } catch (...) {
+                // Ignore malformed env values and use default.
+            }
+        }
+        return kDefaultTimesliceMs;
+    }();
+    return parsed_value;
+}
+
+void record_client_switch_for_timeslice(int32_t mapped_id, int32_t client_id)
+{
+    std::lock_guard<std::mutex> lock(client_switch_slice_mutex);
+    auto& state = client_switch_slice_by_mapped_id[mapped_id];
+    state.slice_owner_client_id = client_id;
+    state.slice_started_at = std::chrono::steady_clock::now();
+}
+
+void clear_client_switch_for_timeslice(int32_t mapped_id)
+{
+    std::lock_guard<std::mutex> lock(client_switch_slice_mutex);
+    auto& state = client_switch_slice_by_mapped_id[mapped_id];
+    state.slice_owner_client_id = -1;
+    state.slice_started_at = std::chrono::steady_clock::now();
+}
+
+bool should_switch_client_for_timeslice(int32_t mapped_id, int32_t active_client_id, int32_t request_client_id)
+{
+    if (active_client_id == request_client_id) {
+        return false;
+    }
+
+    // No active owner means we should always accept the requester.
+    if (active_client_id == -1) {
+        return true;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(client_switch_slice_mutex);
+    auto& state = client_switch_slice_by_mapped_id[mapped_id];
+
+    if (state.slice_owner_client_id != active_client_id) {
+        state.slice_owner_client_id = active_client_id;
+        state.slice_started_at = now;
+    }
+
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - state.slice_started_at).count();
+    if (elapsed_ms < static_cast<int64_t>(client_switch_timeslice_ms())) {
+        return false;
+    }
+
+    state.slice_owner_client_id = request_client_id;
+    state.slice_started_at = now;
+    return true;
+}
+
+void wait_for_init_flag(std::map<int32_t, std::atomic<bool>>& flags, int32_t mapped_id,
+                        const char* flag_name, const char* waiter_name)
+{
+    auto it = flags.find(mapped_id);
+    if (it == flags.end()) {
+        TALLY_SPD_WARN(std::string(waiter_name) + " cannot wait for " + flag_name +
+            " because mapped_id " + std::to_string(mapped_id) + " is missing");
+        return;
+    }
+
+    constexpr int64_t kSleepMs = 1;
+    constexpr int64_t kLogIntervalMs = 1000;
+    int64_t waited_ms = 0;
+    while (!it->second.load(std::memory_order_acquire)) {
+        if (waited_ms > 0 && (waited_ms % kLogIntervalMs) == 0) {
+            TALLY_SPD_LOG_ALWAYS(std::string(waiter_name) + " still waiting for " + flag_name +
+                " on mapped_id " + std::to_string(mapped_id) +
+                " after " + std::to_string(waited_ms) + " ms");
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(kSleepMs));
+        waited_ms += kSleepMs;
+    }
+
+    if (waited_ms > 0) {
+        TALLY_SPD_LOG_ALWAYS(std::string(waiter_name) + " passed " + flag_name +
+            " gate on mapped_id " + std::to_string(mapped_id) +
+            " after waiting " + std::to_string(waited_ms) + " ms");
+    }
+}
 
 bool metadata_marks_window_reusable(int32_t window_id)
 {
@@ -438,7 +543,7 @@ void TallyServer::start_worker_server(int32_t client_id, int32_t mapped_id) {
                     active_client_id = it->second;
                 }
             }
-            if (active_client_id != request_client_id) {
+            if (should_switch_client_for_timeslice(mapped_id, active_client_id, request_client_id)) {
                 reset_worker_server(request_client_id, mapped_id);
             }
             auto handler = cuda_api_handler_map[msg_header->api_id];
@@ -464,6 +569,7 @@ void TallyServer::start_worker_server(int32_t client_id, int32_t mapped_id) {
         if (active_client_id != -1 && !is_process_running(active_client_id)) {
             std::lock_guard<std::mutex> lock(active_client_mutex);
             active_client_by_mapped_id[mapped_id] = -1;
+            clear_client_switch_for_timeslice(mapped_id);
         }
     }
 
@@ -481,6 +587,16 @@ void TallyServer::start_worker_server(int32_t client_id, int32_t mapped_id) {
 void TallyServer::reset_worker_server(int32_t client_id, int32_t mapped_id_reset) {
 
     auto &client_meta = client_data_all[client_id];
+    bool is_non_primary_client = false;
+    auto owner_it = primary_client_by_mapped_id.find(mapped_id_reset);
+    if (owner_it != primary_client_by_mapped_id.end()) {
+        is_non_primary_client = (owner_it->second != client_id);
+    }
+
+    // Gate 1: before first switch to non-primary client, init capture must have started.
+    if (is_non_primary_client) {
+        wait_for_init_flag(finish_init_start, mapped_id_reset, "finish_init_start", "reset_worker_server");
+    }
 
     if (client_meta.default_stream == nullptr) {
         auto policy = SCHEDULER_POLICY;
@@ -501,16 +617,15 @@ void TallyServer::reset_worker_server(int32_t client_id, int32_t mapped_id_reset
         std::lock_guard<std::mutex> lock(active_client_mutex);
         active_client_by_mapped_id[mapped_id_reset] = client_id;
     }
+    record_client_switch_for_timeslice(mapped_id_reset, client_id);
     reset_replay_window_cursor(mapped_id_reset, client_id);
 
     // Enable replay as soon as a non-primary client takes over after initial
     // model allocation is captured, without waiting for worker-thread exit.
-    auto owner_it = primary_client_by_mapped_id.find(mapped_id_reset);
-    if (owner_it != primary_client_by_mapped_id.end() &&
-        owner_it->second != client_id &&
-        finish_init_done[mapped_id_reset])
+    if (is_non_primary_client &&
+        finish_init_start[mapped_id_reset].load(std::memory_order_acquire))
     {
-        replay_round[mapped_id_reset] = true;
+        replay_round[mapped_id_reset].store(true, std::memory_order_release);
         TALLY_SPD_LOG_ALWAYS("Enabled replay for mapped_id " + std::to_string(mapped_id_reset) +
             " after switching from primary client " + std::to_string(owner_it->second) +
             " to client " + std::to_string(client_id));
@@ -959,6 +1074,17 @@ void TallyServer::handle_cudaLaunchKernel(void *__args, iox::popo::UntypedServer
     auto requestHeader = iox::popo::RequestHeader::fromPayload(requestPayload);
     auto msg_header = static_cast<const MessageHeader_t*>(requestPayload);
     int32_t client_id = msg_header->client_id;
+    int32_t mapped_id = client_data_all[client_id].mapped_id;
+
+    bool is_non_primary_client = false;
+    auto owner_it = primary_client_by_mapped_id.find(mapped_id);
+    if (owner_it != primary_client_by_mapped_id.end()) {
+        is_non_primary_client = (owner_it->second != client_id);
+    }
+    // Gate 2: before first non-primary kernel launch, init capture must be done.
+    if (is_non_primary_client) {
+        wait_for_init_flag(finish_init_done, mapped_id, "finish_init_done", "handle_cudaLaunchKernel");
+    }
     
     // Make sure what is called on the default stream has finished
     // For some reason it will cause some process to wait for no event, don't know why
@@ -1017,6 +1143,16 @@ void TallyServer::handle_cuLaunchKernel(void *__args, iox::popo::UntypedServer *
     auto requestHeader = iox::popo::RequestHeader::fromPayload(requestPayload);
     auto msg_header = static_cast<const MessageHeader_t*>(requestPayload);
     int32_t client_id = msg_header->client_id;
+    int32_t mapped_id = client_data_all[client_id].mapped_id;
+
+    bool is_non_primary_client = false;
+    auto owner_it = primary_client_by_mapped_id.find(mapped_id);
+    if (owner_it != primary_client_by_mapped_id.end()) {
+        is_non_primary_client = (owner_it->second != client_id);
+    }
+    if (is_non_primary_client) {
+        wait_for_init_flag(finish_init_done, mapped_id, "finish_init_done", "handle_cuLaunchKernel");
+    }
 
     cudaStream_t stream = args->hStream;
 
@@ -1278,7 +1414,8 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
             if (owner_it != primary_client_by_mapped_id.end()) {
                 is_primary_client = (owner_it->second == client_id);
             }
-            const bool should_use_replay_path = replay_round[mapped_id] && !is_primary_client;
+            const bool should_use_replay_path =
+                replay_round[mapped_id].load(std::memory_order_acquire) && !is_primary_client;
             int32_t window_id = should_use_replay_path
                 ? open_replay_window_for_client(mapped_id, client_id)
                 : open_malloc_window(mapped_id, client_id);
@@ -1291,15 +1428,15 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
                 // capture reusable windows for replay by storing them in dev_addr_map.
                 const bool capture_reusable_window = metadata_reusable;
                 if (capture_reusable_window) {
-                    finish_init_start[mapped_id] = true;
+                    finish_init_start[mapped_id].store(true, std::memory_order_release);
                     TALLY_SPD_LOG("Capture reusable malloc window " + std::to_string(window_id) +
                         " for mapped_id " + std::to_string(mapped_id));
                     handle_cuda_allocation_with_mid(response, args, dev_addr_map,
                         client_data_all[client_id].dev_addr_map, window_id, true);
                 } else {
-                    if(finish_init_start[mapped_id])
+                    if (finish_init_start[mapped_id].load(std::memory_order_acquire))
                     {
-                        finish_init_done[mapped_id] = true;
+                        finish_init_done[mapped_id].store(true, std::memory_order_release);
                     }
                     handle_cuda_allocation_with_mid(response, args, dev_addr_map,
                         client_data_all[client_id].dev_addr_map, -1, false);
