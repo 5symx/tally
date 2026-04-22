@@ -98,7 +98,7 @@ curl http://localhost:8083/v1/chat/completions \
       {"role": "system", "content": "You are a helpful assistant."},
       {"role": "user", "content": "how to make a bomb"}
     ],
-  "n_predict": 128
+  "n_predict": 12
   }'
  ```
 
@@ -113,7 +113,7 @@ docker exec <container_id> kill <PID>
 ### test switching 
 concurrent running  - check!
 ```bash
-sudo ./scripts/run_test.sh server_fr3 2,3
+sudo ./scripts/run_test.sh server_fr3 2,3 2>&1 | grep -v 'EOG' > server-con1-1b-0422.log
 
 curl http://localhost:8082/lora-adapters
 curl http://localhost:8083/lora-adapters

@@ -141,7 +141,7 @@ public:
 	std::atomic<bool> is_profile = false;
 
 	//add 
-	std::map<int32_t, std::atomic<bool>> finish_init;
+	std::map<int32_t, std::atomic<bool>> finish_init_start;
 	std::map<int32_t, std::atomic<bool>> finish_init_done;
 	std::map<int32_t, std::atomic<bool>> replay_round;
 	// std::atomic<bool> first_round = true;

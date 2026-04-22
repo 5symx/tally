@@ -2,9 +2,12 @@
 #include <dlfcn.h>
 #include <cassert>
 #include <unordered_set>
+#include <unordered_map>
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
+#include <cstdlib>
+#include <sstream>
 
 #include <tally/transform.h>
 #include <tally/util.h>
@@ -21,6 +24,202 @@
 #include <cuda_profiler_api.h>
 
 TallyServer *TallyServer::server = new TallyServer();
+
+namespace {
+
+enum class WindowOpType {
+    MemcpyAsync,
+    MemsetAsync,
+    StreamSynchronize,
+};
+
+struct MallocWindowState {
+    int32_t malloc_count = 0;
+    int32_t current_window_id = -1;
+    std::unordered_map<int32_t, int32_t> current_window_id_by_client;
+    std::unordered_map<int32_t, bool> reusable_by_window_id;
+    std::unordered_map<int32_t, int32_t> replay_next_window_by_client;
+    std::unordered_map<int32_t, uint64_t> memcpy_async_count_by_window_id;
+    std::unordered_map<int32_t, uint64_t> memset_async_count_by_window_id;
+    std::unordered_map<int32_t, uint64_t> stream_sync_count_by_window_id;
+};
+
+std::mutex malloc_window_state_mutex;
+std::unordered_map<int32_t, MallocWindowState> malloc_window_state_by_mapped_id;
+
+bool metadata_marks_window_reusable(int32_t window_id)
+{
+    static bool parsed = false;
+    static bool reusable_all_windows = false;
+    static std::unordered_set<int32_t> reusable_window_ids;
+
+
+    if (!parsed) {
+        parsed = true;
+        if (const char* env = std::getenv("TALLY_REUSABLE_WINDOWS")) {
+            std::string raw(env);
+
+            TALLY_SPD_LOG("TALLY_REUSABLE_WINDOWS is  " + raw);
+
+            if (raw == "all" || raw == "ALL" || raw == "*") {
+                reusable_all_windows = true;
+            } else {
+                std::stringstream ss(raw);
+                std::string token;
+                while (std::getline(ss, token, ',')) {
+                    try {
+                        reusable_window_ids.insert(std::stoi(token));
+                    } catch (...) {
+                        // Ignore malformed tokens and keep other valid window IDs.
+                    }
+                }
+            }
+        }
+    }
+
+    return reusable_all_windows || reusable_window_ids.find(window_id) != reusable_window_ids.end();
+}
+
+int32_t open_malloc_window(int32_t mapped_id, int32_t client_id)
+{
+    std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
+    auto& state = malloc_window_state_by_mapped_id[mapped_id];
+
+    if (state.current_window_id != -1) {
+        TALLY_SPD_LOG("Closing malloc window " + std::to_string(state.current_window_id) +
+            " for mapped_id " + std::to_string(mapped_id));
+    }
+
+    state.malloc_count += 1;
+    state.current_window_id = state.malloc_count;
+    state.current_window_id_by_client[client_id] = state.current_window_id;
+    state.reusable_by_window_id[state.current_window_id] = false;
+
+    TALLY_SPD_LOG("Opening malloc window " + std::to_string(state.current_window_id) +
+        " for mapped_id " + std::to_string(mapped_id) + " for client_id " + std::to_string(client_id));
+
+    return state.current_window_id;
+}
+
+int32_t open_replay_window_for_client(int32_t mapped_id, int32_t client_id)
+{
+    std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
+    auto& state = malloc_window_state_by_mapped_id[mapped_id];
+    auto& replay_next = state.replay_next_window_by_client[client_id];
+
+    if (replay_next <= 0) {
+        replay_next = 1;
+    }
+
+    if (state.current_window_id != -1) {
+        TALLY_SPD_LOG("Closing malloc window " + std::to_string(state.current_window_id) +
+            " for mapped_id " + std::to_string(mapped_id) + " (replay)");
+    }
+
+    state.current_window_id = replay_next;
+    state.current_window_id_by_client[client_id] = state.current_window_id;
+    TALLY_SPD_LOG("Opening malloc window " + std::to_string(state.current_window_id) +
+        " for mapped_id " + std::to_string(mapped_id) + " (replay)");
+    replay_next += 1;
+
+    return state.current_window_id;
+}
+
+void reset_replay_window_cursor(int32_t mapped_id, int32_t client_id)
+{
+    std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
+    auto& state = malloc_window_state_by_mapped_id[mapped_id];
+    auto it = state.replay_next_window_by_client.find(client_id);
+    if (it == state.replay_next_window_by_client.end() || it->second <= 0) {
+        state.replay_next_window_by_client[client_id] = 1;
+    }
+}
+
+void set_window_reusable(int32_t mapped_id, int32_t window_id, bool reusable)
+{
+    if (window_id <= 0) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
+    auto& state = malloc_window_state_by_mapped_id[mapped_id];
+    state.reusable_by_window_id[window_id] = reusable;
+}
+
+bool is_window_reusable(int32_t mapped_id, int32_t window_id)
+{
+    if (window_id <= 0) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
+    auto state_it = malloc_window_state_by_mapped_id.find(mapped_id);
+    if (state_it == malloc_window_state_by_mapped_id.end()) {
+        return false;
+    }
+
+    auto reusable_it = state_it->second.reusable_by_window_id.find(window_id);
+    if (reusable_it == state_it->second.reusable_by_window_id.end()) {
+        return false;
+    }
+
+    return reusable_it->second;
+}
+
+bool should_bypass_for_current_window(int32_t mapped_id, int32_t client_id)
+{
+    std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
+    auto state_it = malloc_window_state_by_mapped_id.find(mapped_id);
+    if (state_it == malloc_window_state_by_mapped_id.end()) {
+        return false;
+    }
+
+    auto current_window_it = state_it->second.current_window_id_by_client.find(client_id);
+    if (current_window_it == state_it->second.current_window_id_by_client.end()) {
+        return false;
+    }
+
+    int32_t window_id = current_window_it->second;
+    if (window_id <= 0) {
+        return false;
+    }
+
+    auto reusable_it = state_it->second.reusable_by_window_id.find(window_id);
+    return reusable_it != state_it->second.reusable_by_window_id.end() && reusable_it->second;
+}
+
+void attribute_op_to_current_window(int32_t mapped_id, int32_t client_id, WindowOpType op_type)
+{
+    std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
+    auto state_it = malloc_window_state_by_mapped_id.find(mapped_id);
+    if (state_it == malloc_window_state_by_mapped_id.end()) {
+        return;
+    }
+
+    auto current_window_it = state_it->second.current_window_id_by_client.find(client_id);
+    if (current_window_it == state_it->second.current_window_id_by_client.end()) {
+        return;
+    }
+
+    int32_t window_id = current_window_it->second;
+    if (window_id <= 0) {
+        return;
+    }
+
+    switch (op_type) {
+    case WindowOpType::MemcpyAsync:
+        state_it->second.memcpy_async_count_by_window_id[window_id] += 1;
+        break;
+    case WindowOpType::MemsetAsync:
+        state_it->second.memset_async_count_by_window_id[window_id] += 1;
+        break;
+    case WindowOpType::StreamSynchronize:
+        state_it->second.stream_sync_count_by_window_id[window_id] += 1;
+        break;
+    }
+}
+
+}
 
 TallyServer::TallyServer()
 {
@@ -98,7 +297,8 @@ void TallyServer::start_main_server() {
                 mapped_id_init[mapped_id] = true;
                 threads_running_map[mapped_id] = true;
                 //add
-                finish_init[mapped_id] = false;
+                // finish_init[mapped_id] = false;
+                finish_init_start[mapped_id] = false;
                 finish_init_done[mapped_id] = false;
                 replay_round[mapped_id] = false;
                 primary_client_by_mapped_id[mapped_id] = client_id;
@@ -301,6 +501,7 @@ void TallyServer::reset_worker_server(int32_t client_id, int32_t mapped_id_reset
         std::lock_guard<std::mutex> lock(active_client_mutex);
         active_client_by_mapped_id[mapped_id_reset] = client_id;
     }
+    reset_replay_window_cursor(mapped_id_reset, client_id);
 
     // Enable replay as soon as a non-primary client takes over after initial
     // model allocation is captured, without waiting for worker-thread exit.
@@ -1078,84 +1279,56 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
                 is_primary_client = (owner_it->second == client_id);
             }
             const bool should_use_replay_path = replay_round[mapped_id] && !is_primary_client;
+            int32_t window_id = should_use_replay_path
+                ? open_replay_window_for_client(mapped_id, client_id)
+                : open_malloc_window(mapped_id, client_id);
+            const bool metadata_reusable = metadata_marks_window_reusable(window_id);
+            TALLY_SPD_LOG("metadata_reusable set to " + std::to_string(metadata_reusable));
+            set_window_reusable(mapped_id, window_id, metadata_reusable);
 
-            if(!should_use_replay_path) // primary or pre-replay path
-            {
-                if(!finish_init[mapped_id]) // before first kernel launch
-                {
-                    handle_cuda_allocation_with_mid(response, args, dev_addr_map, client_data_all[client_id].dev_addr_map, mapped_id, true);
-                    finish_init[mapped_id] = true; // only first cudamalloc is for reuse model
-                }
-                else
-                {
-                    finish_init_done[mapped_id] = true;
-                    if(client_data_all[client_id].first_init == false)
+            if (!should_use_replay_path) {
+                // First worker always follows normal cudaMalloc path, and can optionally
+                // capture reusable windows for replay by storing them in dev_addr_map.
+                const bool capture_reusable_window = metadata_reusable;
+                if (capture_reusable_window) {
+                    finish_init_start[mapped_id] = true;
+                    TALLY_SPD_LOG("Capture reusable malloc window " + std::to_string(window_id) +
+                        " for mapped_id " + std::to_string(mapped_id));
+                    handle_cuda_allocation_with_mid(response, args, dev_addr_map,
+                        client_data_all[client_id].dev_addr_map, window_id, true);
+                } else {
+                    if(finish_init_start[mapped_id])
                     {
-                        TALLY_SPD_LOG("set first_init for disable bypass for future.");
-                        client_data_all[client_id].first_init = true;
+                        finish_init_done[mapped_id] = true;
                     }
-                    handle_cuda_allocation_with_mid(response, args, dev_addr_map, client_data_all[client_id].dev_addr_map, -1, false);
-
-                    // for (size_t i = 0; i < worker_threads.size(); ++i) {
-
-                    //     // Check if the current element's ID matches
-                    //     if (worker_threads[i].mapped_id == client_data_all[client_id].mapped_id) {
-                            
-                    //         // // --- How to print the index ---
-                    //         // std::cout << "Found a match for mapped_id " << mapped_id_to_find 
-                    //         //           << " at index: " << i << std::endl;
-
-                    //         // //after model init
-                    //         // {
-                    //         //     std::lock_guard<std::mutex> lock(mtx[i]);
-                    //         //     std::cout << "Writer: Writing data..." << std::endl;
-                    //         //     this->data_ready[i] = true;
-                    //         //     cv[i].notify_all();
-                    //         // } // Lock released
-                            
-                            
-                    //     }
-                    // }
-
-                    
+                    handle_cuda_allocation_with_mid(response, args, dev_addr_map,
+                        client_data_all[client_id].dev_addr_map, -1, false);
                 }
-            }
-            else // reuse exist cudaMalloc content - init for memory
-            {
-                if(client_data_all[client_id].rc_mem == false && mapped_id != -1)
-                {
-                    // TALLY_SPD_WARN("current rc memory id " + std::to_string(client_data_all[client_id].rc_mem_Size));
-                    response->devPtr = get_addr_by_init_memory_id(dev_addr_map, mapped_id);
-                    if (response->devPtr != nullptr)
-                    {
-                        // if(client_data_all[client_id].rc_mem_Size > 0)
-                        // {
-                        //     client_data_all[client_id].first_init = true; // only first cudamalloc is for reuse  model
-                        //     handle_cuda_allocation(response, args, dev_addr_map, init_mem_Size, false);
-                        // }
-                        // else // init first model malloc only
-                        // {
-                            response->err = cudaSuccess;
-                            client_data_all[client_id].rc_mem = true;
-                            TALLY_SPD_WARN("recovery ID memory with current mr size " + std::to_string(mapped_id));
-                        // }
-                    }
-                    else
-                    {
-                        response->err = cudaErrorMemoryAllocation;
-                        response->devPtr = nullptr;
-                        TALLY_SPD_WARN("Encountered cudaErrorMemoryAllocation " + std::string(__FILE__) + ":" + std::to_string(__LINE__));
+
+                // if (!finish_init[mapped_id]) {
+                //     finish_init[mapped_id] = true;
+                // } else {
+                //     finish_init_done[mapped_id] = true;
+                // }
+            } else {
+                bool reused_existing_window = false;
+                if (is_window_reusable(mapped_id, window_id) && mapped_id != -1) {
+                    response->devPtr = get_addr_by_init_memory_id(dev_addr_map, window_id);
+                    if (response->devPtr != nullptr) {
+                        response->err = cudaSuccess;
+                        reused_existing_window = true;
+                        TALLY_SPD_LOG("Recovered reusable window " + std::to_string(window_id) +
+                            " for mapped_id " + std::to_string(mapped_id));
+                    } else {
+                        TALLY_SPD_WARN("Reusable window " + std::to_string(window_id) +
+                            " marked by metadata but not captured; fallback to normal cudaMalloc");
+                        set_window_reusable(mapped_id, window_id, false);
                     }
                 }
-                else
-                {
-                    if(client_data_all[client_id].first_init == false)
-                    {
-                        TALLY_SPD_LOG("set first_init for disable bypass for future.");
-                        client_data_all[client_id].first_init = true;
-                    }
-                        
-                    handle_cuda_allocation_with_mid(response, args, dev_addr_map, client_data_all[client_id].dev_addr_map, -1, false);
+
+                if (!reused_existing_window) {
+                    handle_cuda_allocation_with_mid(response, args, dev_addr_map,
+                        client_data_all[client_id].dev_addr_map, -1, false);
                 }
             }
 
@@ -1285,9 +1458,20 @@ void TallyServer::handle_cudaMemcpyAsync(void *__args, iox::popo::UntypedServer 
 
             wait_until_launch_queue_empty(client_id);
 
+            auto mapped_id = client_data_all[client_id].mapped_id;
+            bool is_primary_client = false;
+            auto owner_it = primary_client_by_mapped_id.find(mapped_id);
+            if (owner_it != primary_client_by_mapped_id.end()) {
+                is_primary_client = (owner_it->second == client_id);
+            }
+            const bool should_use_replay_path = replay_round[mapped_id] && !is_primary_client;
+            attribute_op_to_current_window(mapped_id, client_id, WindowOpType::MemcpyAsync);
+            const bool should_bypass_current_window =
+                should_use_replay_path && should_bypass_for_current_window(mapped_id, client_id);
+
             if (args->kind == cudaMemcpyHostToDevice) {
 
-                if(replay_round[client_data_all[client_id].mapped_id] && !client_data_all[client_id].first_init)
+                if (should_bypass_current_window)
                 {
                     TALLY_SPD_LOG("Bypass cudaMemcpyAsync");
                     res->err = cudaSuccess;
@@ -3205,10 +3389,20 @@ void TallyServer::handle_cudaStreamSynchronize(void *__args, iox::popo::UntypedS
         .and_then([&](auto& responsePayload) {
 
             wait_until_launch_queue_empty(client_id);
-
+            
             auto response = static_cast<cudaError_t*>(responsePayload);
+            auto mapped_id = client_data_all[client_id].mapped_id;
+            bool is_primary_client = false;
+            auto owner_it = primary_client_by_mapped_id.find(mapped_id);
+            if (owner_it != primary_client_by_mapped_id.end()) {
+                is_primary_client = (owner_it->second == client_id);
+            }
+            const bool should_use_replay_path = replay_round[mapped_id] && !is_primary_client;
+            attribute_op_to_current_window(mapped_id, client_id, WindowOpType::StreamSynchronize);
+            const bool should_bypass_current_window =
+                should_use_replay_path && should_bypass_for_current_window(mapped_id, client_id);
 
-            if(replay_round[client_data_all[client_id].mapped_id] && !client_data_all[client_id].first_init)
+            if (should_bypass_current_window)
             {
                 TALLY_SPD_LOG("Bypass cudaStreamSynchronize");
                 *response = cudaSuccess;
@@ -3729,9 +3923,18 @@ void TallyServer::handle_cudaMemset(void *__args, iox::popo::UntypedServer *iox_
             // Make sure all kernels have been dispatched
             wait_until_launch_queue_empty(client_id);
 
-            auto response = static_cast<cudaError_t*>(responsePayload);		
+            auto response = static_cast<cudaError_t*>(responsePayload);
+            auto mapped_id = client_data_all[client_id].mapped_id;
+            bool is_primary_client = false;
+            auto owner_it = primary_client_by_mapped_id.find(mapped_id);
+            if (owner_it != primary_client_by_mapped_id.end()) {
+                is_primary_client = (owner_it->second == client_id);
+            }
+            const bool should_use_replay_path = replay_round[mapped_id] && !is_primary_client;
+            const bool should_bypass_current_window =
+                should_use_replay_path && should_bypass_for_current_window(mapped_id, client_id);
 
-            if(replay_round[client_data_all[client_id].mapped_id] && !client_data_all[client_id].first_init)
+            if (should_bypass_current_window)
             {
                 TALLY_SPD_LOG("Bypass cudaMemsetAsync");
                 *response = cudaSuccess;
@@ -5321,11 +5524,21 @@ void TallyServer::handle_cudaMemsetAsync(void *__args, iox::popo::UntypedServer 
     iox_server->loan(requestHeader, sizeof(cudaError_t), alignof(cudaError_t))
         .and_then([&](auto& responsePayload) {
 
-            wait_until_launch_queue_empty(client_id);
+            wait_until_launch_queue_empty(client_id);    
 
             auto response = static_cast<cudaError_t*>(responsePayload);
+            auto mapped_id = client_data_all[client_id].mapped_id;
+            bool is_primary_client = false;
+            auto owner_it = primary_client_by_mapped_id.find(mapped_id);
+            if (owner_it != primary_client_by_mapped_id.end()) {
+                is_primary_client = (owner_it->second == client_id);
+            }
+            const bool should_use_replay_path = replay_round[mapped_id] && !is_primary_client;
+            attribute_op_to_current_window(mapped_id, client_id, WindowOpType::MemsetAsync);
+            const bool should_bypass_current_window =
+                should_use_replay_path && should_bypass_for_current_window(mapped_id, client_id);
 
-            if(replay_round[client_data_all[client_id].mapped_id] && !client_data_all[client_id].first_init)
+            if (should_bypass_current_window)
             {
                 TALLY_SPD_LOG("Bypass cudaMemsetAsync");
                 *response = cudaSuccess;

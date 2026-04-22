@@ -13,5 +13,5 @@ if [[ "$1" == "profile" ]]; then
     nsys profile --capture-range cudaProfilerApi --trace cuda,osrt,nvtx --stats=true --force-overwrite true $TALLY_SERVER_BIN
 else
     echo "Launching Tally Server directly (without nsys profile)..."
-    $TALLY_SERVER_BIN
+    TALLY_REUSABLE_WINDOWS=1 $TALLY_SERVER_BIN
 fi
