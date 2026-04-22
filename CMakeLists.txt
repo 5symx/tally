@@ -86,6 +86,12 @@ set(TALLY_SERVER_SRC_FILES
     ${PROJECT_SOURCE_DIR}/src/tally/scheduler/workload_aware.cpp
 )
 
+if (SERVER_VERSION STREQUAL "server_fr3")
+    list(APPEND TALLY_SERVER_SRC_FILES
+        ${PROJECT_SOURCE_DIR}/src/tally/server_fr3_internal.cpp
+    )
+endif()
+
 
 
 set(TALLY_CLIENT_SRC_FILES
