@@ -28,5 +28,13 @@ void set_window_reusable(int32_t mapped_id, int32_t window_id, bool reusable);
 bool is_window_reusable(int32_t mapped_id, int32_t window_id);
 bool should_bypass_for_current_window(int32_t mapped_id, int32_t client_id);
 void attribute_op_to_current_window(int32_t mapped_id, int32_t client_id, WindowOpType op_type);
+uint64_t reserve_h2d_index_for_current_window(int32_t mapped_id, int32_t client_id, bool replay_mode);
+void record_profile_h2d_hash_for_current_window_at_index(int32_t mapped_id, int32_t client_id,
+                                                         uint64_t h2d_op_index, uint64_t hash);
+bool verify_replay_h2d_hash_for_current_window_at_index(int32_t mapped_id, int32_t client_id,
+                                                        uint64_t h2d_op_index, uint64_t observed_hash,
+                                                        uint64_t* expected_hash);
+void mark_current_window_replay_invalid(int32_t mapped_id, int32_t client_id);
+bool is_current_window_replay_invalid(int32_t mapped_id, int32_t client_id);
 
 }  // namespace server_fr3_internal

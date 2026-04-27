@@ -106,7 +106,7 @@ stop llama-server outside container with
 ```bash
 docker exec ac5699ef0605 pkill llama-server
 
-docker exec <container_id> pgrep -af llama-server
+docker exec <container_id> pgrep -af llama-server 
 docker exec <container_id> kill <PID>
 ```
 

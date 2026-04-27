@@ -31,6 +31,36 @@ TallyServer *TallyServer::server = new TallyServer();
 
 using namespace server_fr3_internal;
 
+namespace {
+
+uint64_t fnv1a64_hash(const void* data, size_t len)
+{
+    constexpr uint64_t kOffsetBasis = 14695981039346656037ull;
+    constexpr uint64_t kPrime = 1099511628211ull;
+    const auto* bytes = static_cast<const uint8_t*>(data);
+
+    uint64_t hash = kOffsetBasis;
+    for (size_t i = 0; i < len; ++i) {
+        hash ^= static_cast<uint64_t>(bytes[i]);
+        hash *= kPrime;
+    }
+
+    return hash;
+}
+
+bool replay_demote_all_on_hash_miss()
+{
+    static const bool enabled = []() {
+        if (const char* env = std::getenv("TALLY_REPLAY_DEMOTE_ALL_ON_HASH_MISS")) {
+            return std::string(env) == "1" || std::string(env) == "true" || std::string(env) == "TRUE";
+        }
+        return false;
+    }();
+    return enabled;
+}
+
+}  // namespace
+
 TallyServer::TallyServer()
 {
     register_api_handler();
@@ -1312,14 +1342,45 @@ void TallyServer::handle_cudaMemcpyAsync(void *__args, iox::popo::UntypedServer 
                 should_use_replay_path && should_bypass_for_current_window(mapped_id, client_id);
 
             if (args->kind == cudaMemcpyHostToDevice) {
+                const bool current_window_reusable = should_bypass_for_current_window(mapped_id, client_id);
+                const uint64_t observed_hash = fnv1a64_hash(args->data, args->count);
+                const uint64_t h2d_op_index = reserve_h2d_index_for_current_window(
+                    mapped_id, client_id, should_use_replay_path);
+                bool bypass_this_h2d = should_bypass_current_window;
 
-                if (should_bypass_current_window)
-                {
-                    TALLY_SPD_LOG("Bypass cudaMemcpyAsync");
-                    res->err = cudaSuccess;
+                if (!should_use_replay_path && is_primary_client && current_window_reusable) {
+                    record_profile_h2d_hash_for_current_window_at_index(
+                        mapped_id, client_id, h2d_op_index, observed_hash);
+                    TALLY_SPD_LOG("Profiled reusable H2D hash for mapped_id " + std::to_string(mapped_id) +
+                        ", h2d_op_index " + std::to_string(h2d_op_index));
                 }
-                else
-                {
+
+                if (should_bypass_current_window) {
+                    uint64_t expected_hash = 0;
+                    const bool hash_match = verify_replay_h2d_hash_for_current_window_at_index(
+                        mapped_id, client_id, h2d_op_index, observed_hash, &expected_hash);
+                    if (!hash_match) {
+                        mark_current_window_replay_invalid(mapped_id, client_id);
+                        bypass_this_h2d = false;
+                        TALLY_SPD_WARN("Replay miss on H2D hash for mapped_id " + std::to_string(mapped_id) +
+                            ", client_id " + std::to_string(client_id) +
+                            ", h2d_op_index " + std::to_string(h2d_op_index) +
+                            ", expected_hash " + std::to_string(expected_hash) +
+                            ", observed_hash " + std::to_string(observed_hash) +
+                            ". Marked window replay-invalid.");
+                        if (replay_demote_all_on_hash_miss()) {
+                            replay_round[mapped_id].store(false, std::memory_order_release);
+                            TALLY_SPD_WARN("Disabled replay_round for mapped_id " + std::to_string(mapped_id) +
+                                " due to H2D hash replay miss.");
+                        }
+                    }
+                }
+
+                if (bypass_this_h2d) {
+                    TALLY_SPD_LOG("Bypass cudaMemcpyAsync after context-verify for mapped_id " +
+                        std::to_string(mapped_id) + ", h2d_op_index " + std::to_string(h2d_op_index));
+                    res->err = cudaSuccess;
+                } else {
                     res->err = cudaMemcpyAsync(args->dst, args->data, args->count, args->kind, stream);
                 }
 

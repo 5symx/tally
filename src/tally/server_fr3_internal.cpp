@@ -8,6 +8,7 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include <tally/log.h>
 
@@ -22,10 +23,20 @@ struct MallocWindowState {
     std::unordered_map<int32_t, uint64_t> memcpy_async_count_by_window_id;
     std::unordered_map<int32_t, uint64_t> memset_async_count_by_window_id;
     std::unordered_map<int32_t, uint64_t> stream_sync_count_by_window_id;
+    std::unordered_map<int32_t, std::vector<uint64_t>> profiled_h2d_hashes_by_window_id;
+    std::unordered_map<int32_t, uint64_t> profile_h2d_cursor_by_window_id;
+    std::unordered_map<uint64_t, uint64_t> replay_h2d_cursor_by_client_window_key;
+    std::unordered_map<int32_t, bool> replay_invalid_by_window_id;
 };
 
 std::mutex malloc_window_state_mutex;
 std::unordered_map<int32_t, MallocWindowState> malloc_window_state_by_mapped_id;
+
+uint64_t make_client_window_key(int32_t client_id, int32_t window_id)
+{
+    return (static_cast<uint64_t>(static_cast<uint32_t>(client_id)) << 32) |
+           static_cast<uint32_t>(window_id);
+}
 
 struct ClientSwitchSliceState {
     int32_t slice_owner_client_id = -1;
@@ -176,6 +187,10 @@ int32_t open_malloc_window(int32_t mapped_id, int32_t client_id)
     state.current_window_id = state.malloc_count;
     state.current_window_id_by_client[client_id] = state.current_window_id;
     state.reusable_by_window_id[state.current_window_id] = false;
+    state.replay_invalid_by_window_id[state.current_window_id] = false;
+    state.profiled_h2d_hashes_by_window_id[state.current_window_id].clear();
+    state.profile_h2d_cursor_by_window_id[state.current_window_id] = 0;
+    state.replay_h2d_cursor_by_client_window_key.erase(make_client_window_key(client_id, state.current_window_id));
 
     TALLY_SPD_LOG("Opening malloc window " + std::to_string(state.current_window_id) +
         " for mapped_id " + std::to_string(mapped_id) + " for client_id " + std::to_string(client_id));
@@ -200,6 +215,7 @@ int32_t open_replay_window_for_client(int32_t mapped_id, int32_t client_id)
 
     state.current_window_id = replay_next;
     state.current_window_id_by_client[client_id] = state.current_window_id;
+    state.replay_h2d_cursor_by_client_window_key[make_client_window_key(client_id, state.current_window_id)] = 0;
     TALLY_SPD_LOG("Opening malloc window " + std::to_string(state.current_window_id) +
         " for mapped_id " + std::to_string(mapped_id) + " (replay)");
     replay_next += 1;
@@ -266,6 +282,11 @@ bool should_bypass_for_current_window(int32_t mapped_id, int32_t client_id)
         return false;
     }
 
+    auto invalid_it = state_it->second.replay_invalid_by_window_id.find(window_id);
+    if (invalid_it != state_it->second.replay_invalid_by_window_id.end() && invalid_it->second) {
+        return false;
+    }
+
     auto reusable_it = state_it->second.reusable_by_window_id.find(window_id);
     return reusable_it != state_it->second.reusable_by_window_id.end() && reusable_it->second;
 }
@@ -299,6 +320,165 @@ void attribute_op_to_current_window(int32_t mapped_id, int32_t client_id, Window
         state_it->second.stream_sync_count_by_window_id[window_id] += 1;
         break;
     }
+}
+
+uint64_t reserve_h2d_index_for_current_window(int32_t mapped_id, int32_t client_id, bool replay_mode)
+{
+    std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
+    auto state_it = malloc_window_state_by_mapped_id.find(mapped_id);
+    if (state_it == malloc_window_state_by_mapped_id.end()) {
+        return 0;
+    }
+
+    auto current_window_it = state_it->second.current_window_id_by_client.find(client_id);
+    if (current_window_it == state_it->second.current_window_id_by_client.end()) {
+        return 0;
+    }
+
+    int32_t window_id = current_window_it->second;
+    if (window_id <= 0) {
+        return 0;
+    }
+
+    if (replay_mode) {
+        const uint64_t key = make_client_window_key(client_id, window_id);
+        uint64_t& cursor = state_it->second.replay_h2d_cursor_by_client_window_key[key];
+        const uint64_t index = cursor;
+        cursor += 1;
+        return index;
+    }
+
+    uint64_t& cursor = state_it->second.profile_h2d_cursor_by_window_id[window_id];
+    const uint64_t index = cursor;
+    cursor += 1;
+    return index;
+}
+
+void record_profile_h2d_hash_for_current_window_at_index(int32_t mapped_id, int32_t client_id,
+                                                         uint64_t h2d_op_index, uint64_t hash)
+{
+    std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
+    auto state_it = malloc_window_state_by_mapped_id.find(mapped_id);
+    if (state_it == malloc_window_state_by_mapped_id.end()) {
+        return;
+    }
+
+    auto current_window_it = state_it->second.current_window_id_by_client.find(client_id);
+    if (current_window_it == state_it->second.current_window_id_by_client.end()) {
+        return;
+    }
+
+    int32_t window_id = current_window_it->second;
+    if (window_id <= 0) {
+        return;
+    }
+
+    auto& profiled_hashes = state_it->second.profiled_h2d_hashes_by_window_id[window_id];
+    if (profiled_hashes.size() <= h2d_op_index) {
+        profiled_hashes.resize(static_cast<size_t>(h2d_op_index + 1), 0);
+    }
+    profiled_hashes[static_cast<size_t>(h2d_op_index)] = hash;
+}
+
+bool verify_replay_h2d_hash_for_current_window_at_index(int32_t mapped_id, int32_t client_id,
+                                                        uint64_t h2d_op_index, uint64_t observed_hash,
+                                                        uint64_t* expected_hash)
+{
+    if (expected_hash != nullptr) {
+        *expected_hash = 0;
+    }
+
+    std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
+    auto state_it = malloc_window_state_by_mapped_id.find(mapped_id);
+    if (state_it == malloc_window_state_by_mapped_id.end()) {
+        return false;
+    }
+
+    auto current_window_it = state_it->second.current_window_id_by_client.find(client_id);
+    if (current_window_it == state_it->second.current_window_id_by_client.end()) {
+        return false;
+    }
+
+    int32_t window_id = current_window_it->second;
+    if (window_id <= 0) {
+        return false;
+    }
+
+    auto invalid_it = state_it->second.replay_invalid_by_window_id.find(window_id);
+    if (invalid_it != state_it->second.replay_invalid_by_window_id.end() && invalid_it->second) {
+        return false;
+    }
+
+    auto profiled_it = state_it->second.profiled_h2d_hashes_by_window_id.find(window_id);
+    if (profiled_it == state_it->second.profiled_h2d_hashes_by_window_id.end()) {
+        state_it->second.replay_invalid_by_window_id[window_id] = true;
+        return false;
+    }
+
+    const auto& profiled_hashes = profiled_it->second;
+    if (h2d_op_index >= profiled_hashes.size()) {
+        state_it->second.replay_invalid_by_window_id[window_id] = true;
+        return false;
+    }
+
+    const uint64_t expected = profiled_hashes[static_cast<size_t>(h2d_op_index)];
+    if (expected_hash != nullptr) {
+        *expected_hash = expected;
+    }
+
+    if (observed_hash != expected) {
+        state_it->second.replay_invalid_by_window_id[window_id] = true;
+        return false;
+    }
+
+    return true;
+}
+
+void mark_current_window_replay_invalid(int32_t mapped_id, int32_t client_id)
+{
+    std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
+    auto state_it = malloc_window_state_by_mapped_id.find(mapped_id);
+    if (state_it == malloc_window_state_by_mapped_id.end()) {
+        return;
+    }
+
+    auto current_window_it = state_it->second.current_window_id_by_client.find(client_id);
+    if (current_window_it == state_it->second.current_window_id_by_client.end()) {
+        return;
+    }
+
+    int32_t window_id = current_window_it->second;
+    if (window_id <= 0) {
+        return;
+    }
+
+    state_it->second.replay_invalid_by_window_id[window_id] = true;
+}
+
+bool is_current_window_replay_invalid(int32_t mapped_id, int32_t client_id)
+{
+    std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
+    auto state_it = malloc_window_state_by_mapped_id.find(mapped_id);
+    if (state_it == malloc_window_state_by_mapped_id.end()) {
+        return false;
+    }
+
+    auto current_window_it = state_it->second.current_window_id_by_client.find(client_id);
+    if (current_window_it == state_it->second.current_window_id_by_client.end()) {
+        return false;
+    }
+
+    int32_t window_id = current_window_it->second;
+    if (window_id <= 0) {
+        return false;
+    }
+
+    auto invalid_it = state_it->second.replay_invalid_by_window_id.find(window_id);
+    if (invalid_it == state_it->second.replay_invalid_by_window_id.end()) {
+        return false;
+    }
+
+    return invalid_it->second;
 }
 
 }  // namespace server_fr3_internal
