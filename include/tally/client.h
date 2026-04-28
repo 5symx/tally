@@ -61,7 +61,7 @@ public:
     {
         // Add new models here to assign stable IDs.
         static const std::unordered_map<std::string, int> model_map = {
-            {"ggml-org_gemma-3-1b-it-GGUF_gemma-3-1b-it-Q4_K_M.gguf", 2},
+            {"ggml-org_gemma-3-1b-it-GGUF_gemma-3-1b-it-Q4_K_M.gguf", 1},
             {"Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf", 2},
         };
         return model_map;

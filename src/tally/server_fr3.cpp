@@ -54,6 +54,16 @@ std::mutex active_h2d_remap_mutex;
 std::unordered_map<uint64_t, ActiveH2DRemap> active_h2d_remap_by_client_window_key;
 std::atomic<uint64_t> replay_reinit_allocation_id_seed{1000000};
 
+size_t make_replay_allocation_id(int32_t mapped_id, int32_t window_id)
+{
+    if (window_id <= 0) {
+        return 0;
+    }
+
+    return (static_cast<uint64_t>(static_cast<uint32_t>(mapped_id)) << 32) |
+           static_cast<uint32_t>(window_id);
+}
+
 uint64_t make_client_window_key_for_replay(int32_t client_id, int32_t window_id)
 {
     return (static_cast<uint64_t>(static_cast<uint32_t>(client_id)) << 32) |
@@ -1268,7 +1278,7 @@ void TallyServer::handle___cudaRegisterFatBinaryEnd(void *__args, iox::popo::Unt
 void TallyServer::handle_cuda_allocation_with_mid(cudaMallocResponse* response, cudaMallocArg* args,
                             std::vector<mem_region>& dev_addr_map,
                             std::vector<mem_region>& client_dev_addr_map,
-                            int32_t mapped_id,
+                            size_t allocation_id,
                             bool reuse_flag = false)
 {
     response->err = cudaMalloc(&(response->devPtr), args->size);
@@ -1276,8 +1286,8 @@ void TallyServer::handle_cuda_allocation_with_mid(cudaMallocResponse* response, 
     if (response->err == cudaSuccess) {
         if (reuse_flag) // global
         {
-            dev_addr_map.push_back(mem_region(response->devPtr, args->size, true , mapped_id));
-            TALLY_SPD_WARN("Allocated new memory. Current ID counter: {}" + std::to_string(mapped_id) + " " + std::to_string(args->size)); // Use spdlog's direct formatting
+            dev_addr_map.push_back(mem_region(response->devPtr, args->size, true, allocation_id));
+            TALLY_SPD_WARN("Allocated new memory. Replay allocation id: {}" + std::to_string(allocation_id) + " " + std::to_string(args->size)); // Use spdlog's direct formatting
             
         }
         else // client local
@@ -1331,10 +1341,13 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
                 const bool capture_reusable_window = metadata_reusable;
                 if (capture_reusable_window) {
                     finish_init_start[mapped_id].store(true, std::memory_order_release);
+                    const size_t replay_allocation_id = make_replay_allocation_id(mapped_id, window_id);
                     TALLY_SPD_LOG("Capture reusable malloc window " + std::to_string(window_id) +
                         " for mapped_id " + std::to_string(mapped_id));
                     handle_cuda_allocation_with_mid(response, args, dev_addr_map,
-                        client_data_all[client_id].dev_addr_map, window_id, true);
+                        client_data_all[client_id].dev_addr_map, replay_allocation_id, true);
+                    set_replay_allocation_id_for_window(
+                        mapped_id, client_id, window_id, replay_allocation_id);
                 } else {
                     if (finish_init_start[mapped_id].load(std::memory_order_acquire))
                     {
@@ -1354,9 +1367,20 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
                 const size_t replay_allocation_id =
                     get_replay_allocation_id_for_window(mapped_id, client_id, window_id);
                 if (is_window_reusable(mapped_id, window_id) && mapped_id != -1) {
+                    TALLY_SPD_LOG("check window reusage regione for window_id " + std::to_string(window_id) +
+                                " for mapped_id " + std::to_string(mapped_id) +
+                                " with allocation id " + std::to_string(replay_allocation_id) +
+                                " and size " + std::to_string(args->size));
+
                     const mem_region* reusable_region =
                         find_reusable_region_by_id(dev_addr_map, replay_allocation_id);
                     if (reusable_region != nullptr && reusable_region->addr != nullptr) {
+                        TALLY_SPD_LOG("Find existed reusage region for window_id " + std::to_string(window_id) +
+                                " for mapped_id " + std::to_string(mapped_id) +
+                                " with allocation id " + std::to_string(replay_allocation_id) +
+                                " and size " + std::to_string(args->size) +
+                                " reuse region size " + std::to_string(reusable_region->size));
+
                         if (reusable_region->size == args->size) {
                             response->devPtr = reusable_region->addr;
                             response->err = cudaSuccess;

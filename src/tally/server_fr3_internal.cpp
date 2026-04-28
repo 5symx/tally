@@ -40,6 +40,16 @@ uint64_t make_client_window_key(int32_t client_id, int32_t window_id)
            static_cast<uint32_t>(window_id);
 }
 
+size_t make_default_replay_allocation_id(int32_t mapped_id, int32_t window_id)
+{
+    if (window_id <= 0) {
+        return 0;
+    }
+
+    return (static_cast<uint64_t>(static_cast<uint32_t>(mapped_id)) << 32) |
+           static_cast<uint32_t>(window_id);
+}
+
 struct ClientSwitchSliceState {
     int32_t slice_owner_client_id = -1;
     std::chrono::steady_clock::time_point slice_started_at = std::chrono::steady_clock::now();
@@ -486,13 +496,13 @@ size_t get_replay_allocation_id_for_window(int32_t mapped_id, int32_t client_id,
     std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
     auto state_it = malloc_window_state_by_mapped_id.find(mapped_id);
     if (state_it == malloc_window_state_by_mapped_id.end()) {
-        return static_cast<size_t>(window_id);
+        return make_default_replay_allocation_id(mapped_id, window_id);
     }
 
     const uint64_t key = make_client_window_key(client_id, window_id);
     auto alloc_it = state_it->second.replay_allocation_id_by_client_window_key.find(key);
     if (alloc_it == state_it->second.replay_allocation_id_by_client_window_key.end()) {
-        return static_cast<size_t>(window_id);
+        return make_default_replay_allocation_id(mapped_id, window_id);
     }
 
     return alloc_it->second;

@@ -217,7 +217,7 @@ public:
 	void handle_cuda_allocation_with_mid(cudaMallocResponse* response, cudaMallocArg* args,
                             std::vector<mem_region>& dev_addr_map,
 							std::vector<mem_region>& client_dev_addr_map,
-                            int32_t mapped_id,
+                            size_t allocation_id,
                             bool reuse_flag);
 
 	int32_t get_client_priority(int32_t client_id);

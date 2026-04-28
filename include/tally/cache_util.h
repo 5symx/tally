@@ -17,7 +17,7 @@
 static void cache_cubin_data(const char* cubin_data, size_t cubin_size, int elf_filename=-1)
 {
     // Write cubin data to file
-    std::string cubin_tmp_path = get_tmp_file_path(".cubin");
+    std::string cubin_tmp_path = get_tmp_file_path(".cubin", elf_filename); // add client_id
     write_binary_to_file(cubin_tmp_path, cubin_data, cubin_size);
     
     auto candidate_cuda_compute_capabilities = get_candidate_cuda_compute_capabilities();
