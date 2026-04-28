@@ -49,10 +49,24 @@ struct ActiveH2DRemap {
     size_t new_size = 0;
 };
 
+struct ReusableVmmRegion {
+    CUdeviceptr addr = 0;
+    size_t requested_size = 0;
+    size_t mapped_size = 0;
+    size_t allocation_id = 0;
+    int32_t mapped_id = -1;
+    int32_t window_id = -1;
+    CUmemGenericAllocationHandle handle = 0;
+    CUmemAccess_flags access_flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+};
+
 std::mutex bypass_h2d_journal_mutex;
 std::unordered_map<uint64_t, std::vector<BypassH2DRecord>> bypass_h2d_journal_by_client_window_key;
 std::mutex active_h2d_remap_mutex;
 std::unordered_map<uint64_t, ActiveH2DRemap> active_h2d_remap_by_client_window_key;
+std::mutex reusable_vmm_mutex;
+std::unordered_map<size_t, ReusableVmmRegion> reusable_vmm_by_allocation_id;
+std::unordered_map<uintptr_t, size_t> reusable_vmm_allocation_id_by_addr;
 std::atomic<uint64_t> replay_reinit_allocation_id_seed{1000000};
 
 size_t make_replay_allocation_id(int32_t mapped_id, int32_t window_id)
@@ -236,6 +250,140 @@ bool replay_demote_all_on_hash_miss()
         return false;
     }();
     return enabled;
+}
+
+size_t align_up(size_t value, size_t alignment)
+{
+    return ((value + alignment - 1) / alignment) * alignment;
+}
+
+cudaError_t allocate_reusable_window_vmm(void** dev_ptr, size_t requested_size, size_t allocation_id,
+                                         int32_t mapped_id, int32_t window_id)
+{
+    if (dev_ptr == nullptr || requested_size == 0 || allocation_id == 0) {
+        return cudaErrorInvalidValue;
+    }
+
+    CUmemAllocationProp prop{};
+    prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+    prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    CHECK_CUDA_ERROR(cuCtxGetDevice(&prop.location.id));
+
+    size_t granularity = 0;
+    auto grc = cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM);
+    if (grc != CUDA_SUCCESS || granularity == 0) {
+        CHECK_CUDA_ERROR(grc);
+        return cudaErrorMemoryAllocation;
+    }
+
+    const size_t mapped_size = align_up(requested_size, granularity);
+    CUdeviceptr addr = 0;
+    CUmemGenericAllocationHandle handle = 0;
+
+    auto rc = cuMemAddressReserve(&addr, mapped_size, 0, 0, 0);
+    if (rc != CUDA_SUCCESS) {
+        CHECK_CUDA_ERROR(rc);
+        return cudaErrorMemoryAllocation;
+    }
+
+    rc = cuMemCreate(&handle, mapped_size, &prop, 0);
+    if (rc != CUDA_SUCCESS) {
+        CHECK_CUDA_ERROR(rc);
+        cuMemAddressFree(addr, mapped_size);
+        return cudaErrorMemoryAllocation;
+    }
+
+    rc = cuMemMap(addr, mapped_size, 0, handle, 0);
+    if (rc != CUDA_SUCCESS) {
+        CHECK_CUDA_ERROR(rc);
+        cuMemRelease(handle);
+        cuMemAddressFree(addr, mapped_size);
+        return cudaErrorMemoryAllocation;
+    }
+
+    CUmemAccessDesc access_desc{};
+    access_desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    access_desc.location.id = prop.location.id;
+    access_desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+    rc = cuMemSetAccess(addr, mapped_size, &access_desc, 1);
+    if (rc != CUDA_SUCCESS) {
+        CHECK_CUDA_ERROR(rc);
+        cuMemUnmap(addr, mapped_size);
+        cuMemRelease(handle);
+        cuMemAddressFree(addr, mapped_size);
+        return cudaErrorMemoryAllocation;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(reusable_vmm_mutex);
+        reusable_vmm_by_allocation_id[allocation_id] = ReusableVmmRegion{
+            addr, requested_size, mapped_size, allocation_id, mapped_id, window_id, handle,
+            CU_MEM_ACCESS_FLAGS_PROT_READWRITE};
+        reusable_vmm_allocation_id_by_addr[static_cast<uintptr_t>(addr)] = allocation_id;
+    }
+
+    *dev_ptr = reinterpret_cast<void*>(addr);
+    return cudaSuccess;
+}
+
+void set_vmm_access_for_mapped_id(int32_t mapped_id, CUmemAccess_flags flags)
+{
+    std::lock_guard<std::mutex> lock(reusable_vmm_mutex);
+    for (auto& [allocation_id, region] : reusable_vmm_by_allocation_id) {
+        (void)allocation_id;
+        if (region.mapped_id != mapped_id || region.addr == 0 || region.mapped_size == 0) {
+            continue;
+        }
+        if (region.access_flags == flags) {
+            continue;
+        }
+        CUmemAccessDesc access_desc{};
+        access_desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+        access_desc.location.id = 0;
+        CHECK_CUDA_ERROR(cuCtxGetDevice(&access_desc.location.id));
+        access_desc.flags = flags;
+        auto rc = cuMemSetAccess(region.addr, region.mapped_size, &access_desc, 1);
+        CHECK_CUDA_ERROR(rc);
+        if (rc == CUDA_SUCCESS) {
+            region.access_flags = flags;
+        }
+    }
+}
+
+bool try_release_vmm_region_by_addr(void* addr)
+{
+    if (addr == nullptr) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(reusable_vmm_mutex);
+    const auto key = reinterpret_cast<uintptr_t>(addr);
+    auto aid_it = reusable_vmm_allocation_id_by_addr.find(key);
+    if (aid_it == reusable_vmm_allocation_id_by_addr.end()) {
+        return false;
+    }
+
+    auto region_it = reusable_vmm_by_allocation_id.find(aid_it->second);
+    if (region_it == reusable_vmm_by_allocation_id.end()) {
+        reusable_vmm_allocation_id_by_addr.erase(aid_it);
+        return false;
+    }
+
+    const auto& region = region_it->second;
+    auto rc = cuMemUnmap(region.addr, region.mapped_size);
+    CHECK_CUDA_ERROR(rc);
+    if (rc == CUDA_SUCCESS) {
+        rc = cuMemRelease(region.handle);
+        CHECK_CUDA_ERROR(rc);
+    }
+    if (rc == CUDA_SUCCESS) {
+        rc = cuMemAddressFree(region.addr, region.mapped_size);
+        CHECK_CUDA_ERROR(rc);
+    }
+
+    reusable_vmm_by_allocation_id.erase(region_it);
+    reusable_vmm_allocation_id_by_addr.erase(aid_it);
+    return true;
 }
 
 }  // namespace
@@ -1286,7 +1434,12 @@ void TallyServer::handle_cuda_allocation_with_mid(cudaMallocResponse* response, 
                             size_t allocation_id,
                             bool reuse_flag = false)
 {
-    response->err = cudaMalloc(&(response->devPtr), args->size);
+    if (reuse_flag && allocation_id > 0) {
+        response->err = allocate_reusable_window_vmm(
+            &(response->devPtr), args->size, allocation_id, -1, -1);
+    } else {
+        response->err = cudaMalloc(&(response->devPtr), args->size);
+    }
 
     if (response->err == cudaSuccess) {
         if (reuse_flag) // global
@@ -1346,16 +1499,29 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
                 const bool capture_reusable_window = metadata_reusable;
                 if (capture_reusable_window) {
                     finish_init_start[mapped_id].store(true, std::memory_order_release);
+                    set_vmm_access_for_mapped_id(mapped_id, CU_MEM_ACCESS_FLAGS_PROT_READWRITE);
                     const size_t replay_allocation_id = make_replay_allocation_id(mapped_id, window_id);
                     TALLY_SPD_LOG("Capture reusable malloc window " + std::to_string(window_id) +
                         " for mapped_id " + std::to_string(mapped_id));
                     handle_cuda_allocation_with_mid(response, args, dev_addr_map,
                         client_data_all[client_id].dev_addr_map, replay_allocation_id, true);
-                    set_replay_allocation_id_for_window(
-                        mapped_id, client_id, window_id, replay_allocation_id);
+                    if (response->err == cudaSuccess && response->devPtr != nullptr) {
+                        {
+                            std::lock_guard<std::mutex> lock(reusable_vmm_mutex);
+                            auto it = reusable_vmm_by_allocation_id.find(replay_allocation_id);
+                            if (it != reusable_vmm_by_allocation_id.end()) {
+                                it->second.mapped_id = mapped_id;
+                                it->second.window_id = window_id;
+                            }
+                        }
+                        set_replay_allocation_id_for_window(
+                            mapped_id, client_id, window_id, replay_allocation_id);
+                    }
                 } else {
                     if (finish_init_start[mapped_id].load(std::memory_order_acquire))
                     {
+                        cudaStreamSynchronize(client_data_all[client_id].default_stream);
+                        set_vmm_access_for_mapped_id(mapped_id, CU_MEM_ACCESS_FLAGS_PROT_READ);
                         finish_init_done[mapped_id].store(true, std::memory_order_release);
                     }
                     handle_cuda_allocation_with_mid(response, args, dev_addr_map,
@@ -1471,7 +1637,11 @@ void TallyServer::handle_cudaFree(void *__args, iox::popo::UntypedServer *iox_se
             }
             else
             {
-                *response = cudaFree(args->devPtr); 
+                if (try_release_vmm_region_by_addr(args->devPtr)) {
+                    *response = cudaSuccess;
+                } else {
+                    *response = cudaFree(args->devPtr);
+                }
                 if (*response == cudaSuccess) {
                     free_mem_region(client_data_all[client_id].dev_addr_map, args->devPtr);
                 }

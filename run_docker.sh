@@ -30,7 +30,7 @@ elif [[ ${DOCKER_IMAGE} == *"tally"* ]]; then
     DOCKER_FLAGS="${DOCKER_FLAGS} --runtime=nvidia \
     -e CUDA_MPS_PIPE_DIRECTORY=/home/ymx \
     -e CUDA_MPS_LOG_DIRECTORY=/home/ymx \
-    -e NVIDIA_VISIBLE_DEVICES=0 \
+    -e NVIDIA_VISIBLE_DEVICES=1 \
     -e TMPDIR=/home/ymx/my_tmp \
     "
 fi
