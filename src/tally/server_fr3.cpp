@@ -11,6 +11,7 @@
 #include <sstream>
 #include <chrono>
 #include <thread>
+#include <algorithm>
 
 #include <tally/transform.h>
 #include <tally/util.h>
@@ -43,7 +44,7 @@ struct BypassH2DRecord {
 
 struct ActiveH2DRemap {
     void* old_base = nullptr;
-    size_t old_size = 0;
+    size_t translation_span_size = 0;
     void* new_base = nullptr;
     size_t new_size = 0;
 };
@@ -97,9 +98,13 @@ void set_active_h2d_remap(int32_t client_id, int32_t window_id, void* old_base, 
         return;
     }
 
+    // When replay remaps to a larger allocation, H2D dst pointers may target the expanded tail.
+    // Translate across the full logical span so these pointers map to the new base as well.
+    const size_t translation_span_size = std::max(old_size, new_size);
+
     std::lock_guard<std::mutex> lock(active_h2d_remap_mutex);
     active_h2d_remap_by_client_window_key[make_client_window_key_for_replay(client_id, window_id)] =
-        ActiveH2DRemap{old_base, old_size, new_base, new_size};
+        ActiveH2DRemap{old_base, translation_span_size, new_base, new_size};
 }
 
 void* translate_h2d_dst_if_remapped(int32_t client_id, int32_t window_id, void* dst)
@@ -115,7 +120,7 @@ void* translate_h2d_dst_if_remapped(int32_t client_id, int32_t window_id, void* 
     }
 
     const auto old_begin = reinterpret_cast<uintptr_t>(it->second.old_base);
-    const auto old_end = old_begin + it->second.old_size;
+    const auto old_end = old_begin + it->second.translation_span_size;
     const auto dst_addr = reinterpret_cast<uintptr_t>(dst);
     if (dst_addr < old_begin || dst_addr >= old_end) {
         return dst;
