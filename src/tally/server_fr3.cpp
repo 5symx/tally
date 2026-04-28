@@ -1394,9 +1394,15 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
                                 " for mapped_id " + std::to_string(mapped_id) +
                                 " with allocation id " + std::to_string(replay_allocation_id) +
                                 " and size " + std::to_string(args->size));
-                        } else {
-                            handle_cuda_allocation_with_mid(response, args, dev_addr_map,
-                        client_data_all[client_id].dev_addr_map, -1, false);
+                        } 
+                        else {
+                            TALLY_SPD_WARN("Reusable window " + std::to_string(window_id) +
+                            " allocation id " + std::to_string(replay_allocation_id) +
+                            " marked by metadata but size mismatch; fallback to normal cudaMalloc");
+                            set_window_reusable(mapped_id, window_id, false);
+
+                        //     handle_cuda_allocation_with_mid(response, args, dev_addr_map,
+                        // client_data_all[client_id].dev_addr_map, -1, false);
                             // const size_t new_replay_allocation_id =
                             //     replay_reinit_allocation_id_seed.fetch_add(1, std::memory_order_relaxed);
                             // response->err = cudaMalloc(&(response->devPtr), args->size);
