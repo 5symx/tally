@@ -10,7 +10,7 @@ MODEL_NAME_TO_ID = {
 
 # Unique port mapping per model ID.
 MODEL_ID_TO_PORT = {
-    1: 8081,
+    1: 8086,
     2: 8082,
     3: 8083,
 }

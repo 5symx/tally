@@ -1,4 +1,5 @@
 #include <cstring>
+#include <cstdint>
 #include <dlfcn.h>
 #include <cassert>
 #include <unordered_set>
@@ -32,6 +33,169 @@ TallyServer *TallyServer::server = new TallyServer();
 using namespace server_fr3_internal;
 
 namespace {
+
+struct BypassH2DRecord {
+    void* dst = nullptr;
+    std::vector<uint8_t> data;
+    size_t count = 0;
+    cudaStream_t stream = nullptr;
+};
+
+struct ActiveH2DRemap {
+    void* old_base = nullptr;
+    size_t old_size = 0;
+    void* new_base = nullptr;
+    size_t new_size = 0;
+};
+
+std::mutex bypass_h2d_journal_mutex;
+std::unordered_map<uint64_t, std::vector<BypassH2DRecord>> bypass_h2d_journal_by_client_window_key;
+std::mutex active_h2d_remap_mutex;
+std::unordered_map<uint64_t, ActiveH2DRemap> active_h2d_remap_by_client_window_key;
+std::atomic<uint64_t> replay_reinit_allocation_id_seed{1000000};
+
+uint64_t make_client_window_key_for_replay(int32_t client_id, int32_t window_id)
+{
+    return (static_cast<uint64_t>(static_cast<uint32_t>(client_id)) << 32) |
+           static_cast<uint32_t>(window_id);
+}
+
+void clear_bypass_h2d_journal(int32_t client_id, int32_t window_id)
+{
+    if (window_id <= 0) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(bypass_h2d_journal_mutex);
+    bypass_h2d_journal_by_client_window_key.erase(make_client_window_key_for_replay(client_id, window_id));
+}
+
+void clear_active_h2d_remap(int32_t client_id, int32_t window_id)
+{
+    if (window_id <= 0) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(active_h2d_remap_mutex);
+    active_h2d_remap_by_client_window_key.erase(make_client_window_key_for_replay(client_id, window_id));
+}
+
+void set_active_h2d_remap(int32_t client_id, int32_t window_id, void* old_base, size_t old_size, void* new_base,
+                          size_t new_size)
+{
+    if (window_id <= 0 || old_base == nullptr || new_base == nullptr || old_size == 0 || new_size == 0) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(active_h2d_remap_mutex);
+    active_h2d_remap_by_client_window_key[make_client_window_key_for_replay(client_id, window_id)] =
+        ActiveH2DRemap{old_base, old_size, new_base, new_size};
+}
+
+void* translate_h2d_dst_if_remapped(int32_t client_id, int32_t window_id, void* dst)
+{
+    if (window_id <= 0 || dst == nullptr) {
+        return dst;
+    }
+
+    std::lock_guard<std::mutex> lock(active_h2d_remap_mutex);
+    auto it = active_h2d_remap_by_client_window_key.find(make_client_window_key_for_replay(client_id, window_id));
+    if (it == active_h2d_remap_by_client_window_key.end()) {
+        return dst;
+    }
+
+    const auto old_begin = reinterpret_cast<uintptr_t>(it->second.old_base);
+    const auto old_end = old_begin + it->second.old_size;
+    const auto dst_addr = reinterpret_cast<uintptr_t>(dst);
+    if (dst_addr < old_begin || dst_addr >= old_end) {
+        return dst;
+    }
+
+    const auto offset = dst_addr - old_begin;
+    if (offset >= it->second.new_size) {
+        return dst;
+    }
+    return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(it->second.new_base) + offset);
+}
+
+const mem_region* find_reusable_region_by_id(const std::vector<mem_region>& regions, size_t allocation_id)
+{
+    for (const auto& region : regions) {
+        if (region.reuse_init_memory && region.init_memory_id == allocation_id) {
+            return &region;
+        }
+    }
+
+    return nullptr;
+}
+
+void append_bypass_h2d_journal(int32_t client_id, int32_t window_id, const cudaMemcpyAsyncArg* args,
+                               cudaStream_t stream)
+{
+    if (window_id <= 0) {
+        return;
+    }
+
+    BypassH2DRecord record;
+    record.dst = args->dst;
+    record.count = args->count;
+    record.stream = stream;
+    record.data.resize(args->count);
+    if (args->count > 0) {
+        std::memcpy(record.data.data(), args->data, args->count);
+    }
+
+    std::lock_guard<std::mutex> lock(bypass_h2d_journal_mutex);
+    bypass_h2d_journal_by_client_window_key[make_client_window_key_for_replay(client_id, window_id)]
+        .push_back(std::move(record));
+}
+
+cudaError_t replay_bypass_h2d_journal(int32_t client_id, int32_t window_id, cudaStream_t fallback_stream,
+                                      void* old_base, size_t old_size, void* new_base, size_t new_size)
+{
+    if (window_id <= 0) {
+        return cudaSuccess;
+    }
+
+    std::vector<BypassH2DRecord> journal;
+    {
+        std::lock_guard<std::mutex> lock(bypass_h2d_journal_mutex);
+        auto it = bypass_h2d_journal_by_client_window_key.find(make_client_window_key_for_replay(client_id, window_id));
+        if (it == bypass_h2d_journal_by_client_window_key.end()) {
+            return cudaSuccess;
+        }
+        journal = it->second;
+    }
+
+    for (auto& rec : journal) {
+        void* dst = rec.dst;
+        if (old_base != nullptr && new_base != nullptr && old_size > 0) {
+            const auto old_begin = reinterpret_cast<uintptr_t>(old_base);
+            const auto old_end = old_begin + old_size;
+            const auto rec_dst = reinterpret_cast<uintptr_t>(rec.dst);
+            if (rec_dst >= old_begin && rec_dst < old_end) {
+                const auto offset = rec_dst - old_begin;
+                if (offset + rec.count > new_size) {
+                    return cudaErrorInvalidValue;
+                }
+                dst = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(new_base) + offset);
+            }
+        }
+
+        cudaStream_t copy_stream = rec.stream ? rec.stream : fallback_stream;
+        auto err = cudaMemcpyAsync(dst, rec.data.data(), rec.count, cudaMemcpyHostToDevice, copy_stream);
+        if (err != cudaSuccess) {
+            return err;
+        }
+        err = cudaStreamSynchronize(copy_stream);
+        if (err != cudaSuccess) {
+            return err;
+        }
+    }
+
+    clear_bypass_h2d_journal(client_id, window_id);
+    return cudaSuccess;
+}
 
 uint64_t fnv1a64_hash(const void* data, size_t len)
 {
@@ -330,7 +494,7 @@ void TallyServer::reset_worker_server(int32_t client_id, int32_t mapped_id_reset
 
     // Gate 1: before first switch to non-primary client, init capture must have started.
     if (is_non_primary_client) {
-        wait_for_init_flag(finish_init_start, mapped_id_reset, "finish_init_start", "reset_worker_server");
+        wait_for_init_flag(finish_init_start, mapped_id_reset, "finish_init_start", "reset_worker_server", 60000);
     }
 
     if (client_meta.default_stream == nullptr) {
@@ -818,7 +982,7 @@ void TallyServer::handle_cudaLaunchKernel(void *__args, iox::popo::UntypedServer
     }
     // Gate 2: before first non-primary kernel launch, init capture must be done.
     if (is_non_primary_client) {
-        wait_for_init_flag(finish_init_done, mapped_id, "finish_init_done", "handle_cudaLaunchKernel");
+        wait_for_init_flag(finish_init_done, mapped_id, "finish_init_done", "handle_cudaLaunchKernel", 60000);
     }
     
     // Make sure what is called on the default stream has finished
@@ -886,7 +1050,7 @@ void TallyServer::handle_cuLaunchKernel(void *__args, iox::popo::UntypedServer *
         is_non_primary_client = (owner_it->second != client_id);
     }
     if (is_non_primary_client) {
-        wait_for_init_flag(finish_init_done, mapped_id, "finish_init_done", "handle_cuLaunchKernel");
+        wait_for_init_flag(finish_init_done, mapped_id, "finish_init_done", "handle_cuLaunchKernel", 60000);
     }
 
     cudaStream_t stream = args->hStream;
@@ -1113,13 +1277,13 @@ void TallyServer::handle_cuda_allocation_with_mid(cudaMallocResponse* response, 
         if (reuse_flag) // global
         {
             dev_addr_map.push_back(mem_region(response->devPtr, args->size, true , mapped_id));
-            TALLY_SPD_WARN("Allocated new memory. Current ID counter: {}" + std::to_string(mapped_id)); // Use spdlog's direct formatting
+            TALLY_SPD_WARN("Allocated new memory. Current ID counter: {}" + std::to_string(mapped_id) + " " + std::to_string(args->size)); // Use spdlog's direct formatting
             
         }
         else // client local
         {
             client_dev_addr_map.push_back(mem_region(response->devPtr, args->size));
-            TALLY_SPD_WARN("Allocated new memory without Current ID counter within client_dev"); // Use spdlog's direct formatting
+            TALLY_SPD_WARN("Allocated new memory without Current ID counter within client_dev " + std::to_string(args->size)); // Use spdlog's direct formatting
         }
         // client_dev_addr_map.push_back( mem_region(response->devPtr, args->size));
         
@@ -1154,6 +1318,9 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
             int32_t window_id = should_use_replay_path
                 ? open_replay_window_for_client(mapped_id, client_id)
                 : open_malloc_window(mapped_id, client_id);
+            record_latest_malloc_size_for_current_window(mapped_id, client_id, args->size);
+            clear_bypass_h2d_journal(client_id, window_id);
+            clear_active_h2d_remap(client_id, window_id);
             const bool metadata_reusable = metadata_marks_window_reusable(window_id);
             TALLY_SPD_LOG("metadata_reusable set to " + std::to_string(metadata_reusable));
             set_window_reusable(mapped_id, window_id, metadata_reusable);
@@ -1184,15 +1351,48 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
                 // }
             } else {
                 bool reused_existing_window = false;
+                const size_t replay_allocation_id =
+                    get_replay_allocation_id_for_window(mapped_id, client_id, window_id);
                 if (is_window_reusable(mapped_id, window_id) && mapped_id != -1) {
-                    response->devPtr = get_addr_by_init_memory_id(dev_addr_map, window_id);
-                    if (response->devPtr != nullptr) {
-                        response->err = cudaSuccess;
-                        reused_existing_window = true;
-                        TALLY_SPD_LOG("Recovered reusable window " + std::to_string(window_id) +
-                            " for mapped_id " + std::to_string(mapped_id));
+                    const mem_region* reusable_region =
+                        find_reusable_region_by_id(dev_addr_map, replay_allocation_id);
+                    if (reusable_region != nullptr && reusable_region->addr != nullptr) {
+                        if (reusable_region->size == args->size) {
+                            response->devPtr = reusable_region->addr;
+                            response->err = cudaSuccess;
+                            reused_existing_window = true;
+                            TALLY_SPD_LOG("Recovered reusable window " + std::to_string(window_id) +
+                                " for mapped_id " + std::to_string(mapped_id) +
+                                " with allocation id " + std::to_string(replay_allocation_id) +
+                                " and size " + std::to_string(args->size));
+                        } else {
+                            const size_t new_replay_allocation_id =
+                                replay_reinit_allocation_id_seed.fetch_add(1, std::memory_order_relaxed);
+                            response->err = cudaMalloc(&(response->devPtr), args->size);
+                            if (response->err == cudaSuccess && response->devPtr != nullptr) {
+                                dev_addr_map.push_back(mem_region(
+                                    response->devPtr, args->size, true, new_replay_allocation_id));
+                                set_window_reusable(mapped_id, window_id, true);
+                                set_replay_allocation_id_for_window(
+                                    mapped_id, client_id, window_id, new_replay_allocation_id);
+                                reused_existing_window = true;
+                                TALLY_SPD_WARN("Reusable window size mismatch for window " +
+                                    std::to_string(window_id) + " (mapped_id " + std::to_string(mapped_id) +
+                                    ", client_id " + std::to_string(client_id) +
+                                    "). Captured size " + std::to_string(reusable_region->size) +
+                                    ", requested size " + std::to_string(args->size) +
+                                    ". Allocated new replay buffer id " + std::to_string(new_replay_allocation_id));
+                            } else {
+                                response->devPtr = nullptr;
+                                set_window_reusable(mapped_id, window_id, false);
+                                TALLY_SPD_WARN("Reusable window size mismatch fallback allocation failed for window " +
+                                    std::to_string(window_id) + " (mapped_id " + std::to_string(mapped_id) +
+                                    ", client_id " + std::to_string(client_id) + ")");
+                            }
+                        }
                     } else {
                         TALLY_SPD_WARN("Reusable window " + std::to_string(window_id) +
+                            " allocation id " + std::to_string(replay_allocation_id) +
                             " marked by metadata but not captured; fallback to normal cudaMalloc");
                         set_window_reusable(mapped_id, window_id, false);
                     }
@@ -1343,6 +1543,7 @@ void TallyServer::handle_cudaMemcpyAsync(void *__args, iox::popo::UntypedServer 
 
             if (args->kind == cudaMemcpyHostToDevice) {
                 const bool current_window_reusable = should_bypass_for_current_window(mapped_id, client_id);
+                const int32_t current_window_id = get_current_window_for_client(mapped_id, client_id);
                 const uint64_t observed_hash = fnv1a64_hash(args->data, args->count);
                 const uint64_t h2d_op_index = reserve_h2d_index_for_current_window(
                     mapped_id, client_id, should_use_replay_path);
@@ -1362,12 +1563,77 @@ void TallyServer::handle_cudaMemcpyAsync(void *__args, iox::popo::UntypedServer 
                     if (!hash_match) {
                         mark_current_window_replay_invalid(mapped_id, client_id);
                         bypass_this_h2d = false;
+                        bool immediate_remap_succeeded = false;
+                        if (current_window_id > 0) {
+                            const size_t previous_allocation_id =
+                                get_replay_allocation_id_for_window(mapped_id, client_id, current_window_id);
+                            const mem_region* previous_region =
+                                find_reusable_region_by_id(dev_addr_map, previous_allocation_id);
+                            if (previous_region != nullptr &&
+                                previous_region->addr != nullptr &&
+                                previous_region->size > 0)
+                            {
+                                void* previous_base = previous_region->addr;
+                                const size_t previous_size = previous_region->size;
+                                const size_t latest_malloc_size = get_latest_malloc_size_for_window(
+                                    mapped_id, client_id, current_window_id);
+                                const size_t remapped_size = latest_malloc_size > 0
+                                    ? latest_malloc_size
+                                    : previous_size;
+                                const size_t remapped_allocation_id = replay_reinit_allocation_id_seed.fetch_add(
+                                    1, std::memory_order_relaxed);
+                                void* remapped_base = nullptr;
+                                auto remap_alloc_err = cudaMalloc(&remapped_base, remapped_size);
+                                TALLY_SPD_WARN("new remapped_size for hash mismatch " + std::to_string(remapped_size));
+                                if (remap_alloc_err == cudaSuccess) {
+                                    const auto replay_err = replay_bypass_h2d_journal(
+                                        client_id,
+                                        current_window_id,
+                                        stream,
+                                        previous_base,
+                                        previous_size,
+                                        remapped_base,
+                                        remapped_size);
+                                    if (replay_err == cudaSuccess) {
+                                        dev_addr_map.push_back(mem_region(
+                                            remapped_base, remapped_size, true, remapped_allocation_id));
+                                        set_window_reusable(mapped_id, current_window_id, true);
+                                        set_replay_allocation_id_for_window(
+                                            mapped_id, client_id, current_window_id, remapped_allocation_id);
+                                        set_active_h2d_remap(
+                                            client_id,
+                                            current_window_id,
+                                            previous_base,
+                                            previous_size,
+                                            remapped_base,
+                                            remapped_size);
+                                        immediate_remap_succeeded = true;
+                                    } else {
+                                        cudaFree(remapped_base);
+                                        TALLY_SPD_WARN("Immediate replay remap journal failed for mapped_id " +
+                                            std::to_string(mapped_id) + ", client_id " + std::to_string(client_id) +
+                                            ", window_id " + std::to_string(current_window_id) +
+                                            ", remapped_size " + std::to_string(remapped_size) +
+                                            ", cuda err " + std::to_string(static_cast<int>(replay_err)));
+                                    }
+                                } else {
+                                    TALLY_SPD_WARN("Immediate replay remap cudaMalloc failed for mapped_id " +
+                                        std::to_string(mapped_id) + ", client_id " + std::to_string(client_id) +
+                                        ", window_id " + std::to_string(current_window_id) +
+                                        ", remapped_size " + std::to_string(remapped_size) +
+                                        ", cuda err " + std::to_string(static_cast<int>(remap_alloc_err)));
+                                }
+                            }
+                        }
                         TALLY_SPD_WARN("Replay miss on H2D hash for mapped_id " + std::to_string(mapped_id) +
                             ", client_id " + std::to_string(client_id) +
+                            ", window_id " + std::to_string(current_window_id) +
                             ", h2d_op_index " + std::to_string(h2d_op_index) +
                             ", expected_hash " + std::to_string(expected_hash) +
                             ", observed_hash " + std::to_string(observed_hash) +
-                            ". Marked window replay-invalid.");
+                            (immediate_remap_succeeded
+                                ? ". Marked window replay-invalid and remapped immediately on first post-miss H2D."
+                                : ". Marked window replay-invalid and immediate remap failed."));
                         if (replay_demote_all_on_hash_miss()) {
                             replay_round[mapped_id].store(false, std::memory_order_release);
                             TALLY_SPD_WARN("Disabled replay_round for mapped_id " + std::to_string(mapped_id) +
@@ -1377,11 +1643,13 @@ void TallyServer::handle_cudaMemcpyAsync(void *__args, iox::popo::UntypedServer 
                 }
 
                 if (bypass_this_h2d) {
+                    append_bypass_h2d_journal(client_id, current_window_id, args, stream);
                     TALLY_SPD_LOG("Bypass cudaMemcpyAsync after context-verify for mapped_id " +
                         std::to_string(mapped_id) + ", h2d_op_index " + std::to_string(h2d_op_index));
                     res->err = cudaSuccess;
                 } else {
-                    res->err = cudaMemcpyAsync(args->dst, args->data, args->count, args->kind, stream);
+                    void* effective_dst = translate_h2d_dst_if_remapped(client_id, current_window_id, args->dst);
+                    res->err = cudaMemcpyAsync(effective_dst, args->data, args->count, args->kind, stream);
                 }
 
             } else if (args->kind == cudaMemcpyDeviceToHost){

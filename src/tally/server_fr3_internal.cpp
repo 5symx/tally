@@ -27,6 +27,8 @@ struct MallocWindowState {
     std::unordered_map<int32_t, uint64_t> profile_h2d_cursor_by_window_id;
     std::unordered_map<uint64_t, uint64_t> replay_h2d_cursor_by_client_window_key;
     std::unordered_map<int32_t, bool> replay_invalid_by_window_id;
+    std::unordered_map<uint64_t, size_t> replay_allocation_id_by_client_window_key;
+    std::unordered_map<uint64_t, size_t> latest_malloc_size_by_client_window_key;
 };
 
 std::mutex malloc_window_state_mutex;
@@ -112,7 +114,7 @@ bool should_switch_client_for_timeslice(int32_t mapped_id, int32_t active_client
 }
 
 void wait_for_init_flag(std::map<int32_t, std::atomic<bool>>& flags, int32_t mapped_id,
-                        const char* flag_name, const char* waiter_name)
+                        const char* flag_name, const char* waiter_name, int64_t timeout_ms)
 {
     auto it = flags.find(mapped_id);
     if (it == flags.end()) {
@@ -125,11 +127,19 @@ void wait_for_init_flag(std::map<int32_t, std::atomic<bool>>& flags, int32_t map
     constexpr int64_t kLogIntervalMs = 1000;
     int64_t waited_ms = 0;
     while (!it->second.load(std::memory_order_acquire)) {
+        if (timeout_ms >= 0 && waited_ms >= timeout_ms) {
+            TALLY_SPD_WARN(std::string(waiter_name) + " timed out waiting for " + flag_name +
+                " on mapped_id " + std::to_string(mapped_id) +
+                " after " + std::to_string(waited_ms) + " ms");
+            return;
+        }
+
         if (waited_ms > 0 && (waited_ms % kLogIntervalMs) == 0) {
             TALLY_SPD_LOG_ALWAYS(std::string(waiter_name) + " still waiting for " + flag_name +
                 " on mapped_id " + std::to_string(mapped_id) +
                 " after " + std::to_string(waited_ms) + " ms");
         }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(kSleepMs));
         waited_ms += kSleepMs;
     }
@@ -432,6 +442,107 @@ bool verify_replay_h2d_hash_for_current_window_at_index(int32_t mapped_id, int32
     }
 
     return true;
+}
+
+int32_t get_current_window_for_client(int32_t mapped_id, int32_t client_id)
+{
+    std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
+    auto state_it = malloc_window_state_by_mapped_id.find(mapped_id);
+    if (state_it == malloc_window_state_by_mapped_id.end()) {
+        return -1;
+    }
+
+    auto current_window_it = state_it->second.current_window_id_by_client.find(client_id);
+    if (current_window_it == state_it->second.current_window_id_by_client.end()) {
+        return -1;
+    }
+
+    return current_window_it->second;
+}
+
+void set_replay_allocation_id_for_window(int32_t mapped_id, int32_t client_id, int32_t window_id,
+                                         size_t allocation_id)
+{
+    if (window_id <= 0 || allocation_id == static_cast<size_t>(-1)) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
+    auto state_it = malloc_window_state_by_mapped_id.find(mapped_id);
+    if (state_it == malloc_window_state_by_mapped_id.end()) {
+        return;
+    }
+
+    state_it->second.replay_allocation_id_by_client_window_key[make_client_window_key(client_id, window_id)] =
+        allocation_id;
+}
+
+size_t get_replay_allocation_id_for_window(int32_t mapped_id, int32_t client_id, int32_t window_id)
+{
+    if (window_id <= 0) {
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
+    auto state_it = malloc_window_state_by_mapped_id.find(mapped_id);
+    if (state_it == malloc_window_state_by_mapped_id.end()) {
+        return static_cast<size_t>(window_id);
+    }
+
+    const uint64_t key = make_client_window_key(client_id, window_id);
+    auto alloc_it = state_it->second.replay_allocation_id_by_client_window_key.find(key);
+    if (alloc_it == state_it->second.replay_allocation_id_by_client_window_key.end()) {
+        return static_cast<size_t>(window_id);
+    }
+
+    return alloc_it->second;
+}
+
+void record_latest_malloc_size_for_current_window(int32_t mapped_id, int32_t client_id, size_t malloc_size)
+{
+    if (malloc_size == 0) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
+    auto state_it = malloc_window_state_by_mapped_id.find(mapped_id);
+    if (state_it == malloc_window_state_by_mapped_id.end()) {
+        return;
+    }
+
+    auto current_window_it = state_it->second.current_window_id_by_client.find(client_id);
+    if (current_window_it == state_it->second.current_window_id_by_client.end()) {
+        return;
+    }
+
+    int32_t window_id = current_window_it->second;
+    if (window_id <= 0) {
+        return;
+    }
+
+    state_it->second.latest_malloc_size_by_client_window_key[make_client_window_key(client_id, window_id)] =
+        malloc_size;
+}
+
+size_t get_latest_malloc_size_for_window(int32_t mapped_id, int32_t client_id, int32_t window_id)
+{
+    if (window_id <= 0) {
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> lock(malloc_window_state_mutex);
+    auto state_it = malloc_window_state_by_mapped_id.find(mapped_id);
+    if (state_it == malloc_window_state_by_mapped_id.end()) {
+        return 0;
+    }
+
+    auto it = state_it->second.latest_malloc_size_by_client_window_key.find(
+        make_client_window_key(client_id, window_id));
+    if (it == state_it->second.latest_malloc_size_by_client_window_key.end()) {
+        return 0;
+    }
+
+    return it->second;
 }
 
 void mark_current_window_replay_invalid(int32_t mapped_id, int32_t client_id)
