@@ -1366,29 +1366,31 @@ void TallyServer::handle_cudaMalloc(void *__args, iox::popo::UntypedServer *iox_
                                 " with allocation id " + std::to_string(replay_allocation_id) +
                                 " and size " + std::to_string(args->size));
                         } else {
-                            const size_t new_replay_allocation_id =
-                                replay_reinit_allocation_id_seed.fetch_add(1, std::memory_order_relaxed);
-                            response->err = cudaMalloc(&(response->devPtr), args->size);
-                            if (response->err == cudaSuccess && response->devPtr != nullptr) {
-                                dev_addr_map.push_back(mem_region(
-                                    response->devPtr, args->size, true, new_replay_allocation_id));
-                                set_window_reusable(mapped_id, window_id, true);
-                                set_replay_allocation_id_for_window(
-                                    mapped_id, client_id, window_id, new_replay_allocation_id);
-                                reused_existing_window = true;
-                                TALLY_SPD_WARN("Reusable window size mismatch for window " +
-                                    std::to_string(window_id) + " (mapped_id " + std::to_string(mapped_id) +
-                                    ", client_id " + std::to_string(client_id) +
-                                    "). Captured size " + std::to_string(reusable_region->size) +
-                                    ", requested size " + std::to_string(args->size) +
-                                    ". Allocated new replay buffer id " + std::to_string(new_replay_allocation_id));
-                            } else {
-                                response->devPtr = nullptr;
-                                set_window_reusable(mapped_id, window_id, false);
-                                TALLY_SPD_WARN("Reusable window size mismatch fallback allocation failed for window " +
-                                    std::to_string(window_id) + " (mapped_id " + std::to_string(mapped_id) +
-                                    ", client_id " + std::to_string(client_id) + ")");
-                            }
+                            handle_cuda_allocation_with_mid(response, args, dev_addr_map,
+                        client_data_all[client_id].dev_addr_map, -1, false);
+                            // const size_t new_replay_allocation_id =
+                            //     replay_reinit_allocation_id_seed.fetch_add(1, std::memory_order_relaxed);
+                            // response->err = cudaMalloc(&(response->devPtr), args->size);
+                            // if (response->err == cudaSuccess && response->devPtr != nullptr) {
+                            //     dev_addr_map.push_back(mem_region(
+                            //         response->devPtr, args->size, true, new_replay_allocation_id));
+                            //     set_window_reusable(mapped_id, window_id, true);
+                            //     set_replay_allocation_id_for_window(
+                            //         mapped_id, client_id, window_id, new_replay_allocation_id);
+                            //     reused_existing_window = true;
+                            //     TALLY_SPD_WARN("Reusable window size mismatch for window " +
+                            //         std::to_string(window_id) + " (mapped_id " + std::to_string(mapped_id) +
+                            //         ", client_id " + std::to_string(client_id) +
+                            //         "). Captured size " + std::to_string(reusable_region->size) +
+                            //         ", requested size " + std::to_string(args->size) +
+                            //         ". Allocated new replay buffer id " + std::to_string(new_replay_allocation_id));
+                            // } else {
+                            //     response->devPtr = nullptr;
+                            //     set_window_reusable(mapped_id, window_id, false);
+                            //     TALLY_SPD_WARN("Reusable window size mismatch fallback allocation failed for window " +
+                            //         std::to_string(window_id) + " (mapped_id " + std::to_string(mapped_id) +
+                            //         ", client_id " + std::to_string(client_id) + ")");
+                            // }
                         }
                     } else {
                         TALLY_SPD_WARN("Reusable window " + std::to_string(window_id) +
